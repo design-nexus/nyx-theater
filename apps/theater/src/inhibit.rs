@@ -1,5 +1,6 @@
 //! Keep the display and machine awake while a video plays, and a sleep timer
-//! that stops playback and suspends at a chosen time.
+//! that stops playback at a chosen time, and suspends if Theater is full screen
+//! and focused then.
 //!
 //! mpv draws through its render API and owns no window, so its own
 //! `stop-screensaver` does nothing. The window holds a GTK idle/suspend
@@ -77,6 +78,11 @@ pub fn install_button(player: &Rc<RefCell<Playback>>) -> (gtk::MenuButton, gtk::
     let p = player.clone();
     fill_menu(&button, move |content, pop| {
         content.append(&widgets::label("SLEEP TIMER", "popover-heading"));
+        let hint = widgets::label("Stops playback. The computer sleeps too if Theater is full screen and focused.", "dim");
+        hint.set_wrap(true);
+        hint.set_max_width_chars(28);
+        hint.set_xalign(0.0);
+        content.append(&hint);
         let selected = selected_minutes();
         for minutes in std::iter::once(0).chain(INTERVALS_MIN.iter().copied()) {
             let (p, pop) = (p.clone(), pop.clone());
@@ -94,7 +100,7 @@ pub fn refresh_button(button: &gtk::MenuButton, readout: &gtk::Label) {
         Some(secs) => {
             let text = remaining_text(secs);
             readout.set_text(&text);
-            button.set_tooltip_text(Some(&format!("Sleep in {text}")));
+            button.set_tooltip_text(Some(&format!("Stops in {text}")));
         }
         None => {
             readout.set_text("");
@@ -142,8 +148,14 @@ fn fire(player: &Rc<RefCell<Playback>>) {
     bump_timer();
     PLAYING.set(false);
     update_inhibit();
+    // Only sleep when you were watching here; a video left in a background window just stops.
+    let suspend = window::window().is_some_and(|w| w.is_fullscreen() && w.is_active());
     player.borrow_mut().close();
     window::leave_fullscreen();
+    if !suspend {
+        window::status("Sleep timer stopped playback");
+        return;
+    }
     let ticket = GEN.get();
     glib::timeout_add_local_once(Duration::from_millis(250), move || {
         if GEN.get() != ticket {

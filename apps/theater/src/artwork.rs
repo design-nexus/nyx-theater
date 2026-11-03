@@ -16,6 +16,8 @@ use std::{
     time::{Instant, SystemTime},
 };
 static CANCELLED: AtomicBool = AtomicBool::new(false);
+/// How long artwork stays decoded after it goes off screen.
+const RELEASE_AFTER_SECS: u32 = 30;
 struct Reply {
     tx: async_channel::Sender<Option<Arc<Vec<u8>>>>,
     active: Arc<AtomicBool>,
@@ -346,10 +348,24 @@ fn load_spec(art: &Artwork, server: &ServerId, mut keys: Vec<String>, width: u32
     let placeholder = art.placeholder.downgrade();
     let active: Rc<RefCell<Option<Arc<AtomicBool>>>> = Rc::new(RefCell::new(None));
     let current = active.clone();
-    art.root.connect_unmap(move |_| {
+    let (held_picture, held_placeholder) = (picture.clone(), placeholder.clone());
+    art.root.connect_unmap(move |root| {
         if let Some(flag) = current.borrow_mut().take() {
             flag.store(false, Ordering::Relaxed);
         }
+        // A decoded poster is about a megabyte, and Home and Discover keep their cards
+        // while hidden; one still off screen a while later is dropped and reloads on map.
+        let (root, picture, placeholder) = (root.downgrade(), held_picture.clone(), held_placeholder.clone());
+        glib::timeout_add_seconds_local_once(RELEASE_AFTER_SECS, move || {
+            let (Some(root), Some(picture), Some(placeholder)) = (root.upgrade(), picture.upgrade(), placeholder.upgrade()) else {
+                return;
+            };
+            if !root.is_mapped() && picture.paintable().is_some() {
+                picture.set_paintable(None::<&gdk::Paintable>);
+                picture.set_visible(false);
+                placeholder.set_visible(true);
+            }
+        });
     });
     let server = server.clone();
     let load: Rc<dyn Fn()> = Rc::new(move || {
@@ -414,7 +430,13 @@ fn load_spec(art: &Artwork, server: &ServerId, mut keys: Vec<String>, width: u32
             }
         });
     });
-    LOADERS.with(|loaders| loaders.borrow_mut().push(Rc::downgrade(&load)));
+    LOADERS.with(|loaders| {
+        let mut loaders = loaders.borrow_mut();
+        if loaders.len() >= 256 {
+            loaders.retain(|loader| loader.strong_count() > 0);
+        }
+        loaders.push(Rc::downgrade(&load));
+    });
     let mapped = load.clone();
     art.root.connect_map(move |_| mapped());
     load();

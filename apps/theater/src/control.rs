@@ -26,9 +26,9 @@ fn encode(id: &ItemId) -> String {
 fn find(args: &Value) -> Result<MediaItem, String> {
     let raw = text(args, "id")?;
     let id: ItemId = serde_json::from_str(&raw).map_err(|_| "that isn't an id from theater.search")?;
-    servers::items()
+    servers::matching(|i| i.id == id)
         .into_iter()
-        .find(|i| i.id == id)
+        .next()
         .map(servers::latest_watch)
         .ok_or_else(|| "no title with that id is loaded; is its server connected?".into())
 }
@@ -58,9 +58,8 @@ fn card(i: &MediaItem) -> Value {
 
 /// The next episode of `show` to play: the first unwatched one, in order.
 pub fn next_up(show: &MediaItem) -> Option<MediaItem> {
-    let mut episodes: Vec<MediaItem> = servers::items()
+    let mut episodes: Vec<MediaItem> = servers::matching(|i| i.kind == MediaKind::Episode && i.series.as_ref() == Some(&show.id))
         .into_iter()
-        .filter(|i| i.kind == MediaKind::Episode && i.series.as_ref() == Some(&show.id))
         .map(servers::latest_watch)
         .collect();
     episodes.sort_by_key(|e| (e.season_number.unwrap_or(0) == 0, e.season_number, e.episode_number));
@@ -72,24 +71,23 @@ pub fn handle(name: &str, args: Value) -> Result<Value, String> {
         "theater.search" => {
             let q = text(&args, "query")?.to_lowercase();
             let words: Vec<&str> = q.split_whitespace().collect();
-            let mut found: Vec<MediaItem> = servers::items()
-                .into_iter()
-                .filter(|i| matches!(i.kind, MediaKind::Movie | MediaKind::Series | MediaKind::Episode))
-                .filter(|i| {
+            let mut found: Vec<MediaItem> = servers::matching(|i| {
+                matches!(i.kind, MediaKind::Movie | MediaKind::Series | MediaKind::Episode) && {
                     let hay = format!("{} {}", i.title, i.tv.series_title.as_deref().unwrap_or("")).to_lowercase();
                     words.iter().all(|w| hay.contains(w))
-                })
-                .collect();
+                }
+            });
             // Movies and shows before episodes, then by title.
             found.sort_by_key(|i| (i.kind == MediaKind::Episode, i.title.to_lowercase()));
             found.truncate(15);
             Ok(json!({"titles": found.iter().map(card).collect::<Vec<_>>(), "untrusted_content": true}))
         }
         "theater.continue_watching" => {
-            let mut items: Vec<MediaItem> = servers::items()
-                .into_iter()
+            let mut items: Vec<MediaItem> =
+                servers::matching(|i| matches!(i.kind, MediaKind::Movie | MediaKind::Episode) && i.resume_ms() > 0)
+                    .into_iter()
                 .map(servers::latest_watch)
-                .filter(|i| matches!(i.kind, MediaKind::Movie | MediaKind::Episode) && i.watch.position_ms > 0 && !i.watch.watched)
+                .filter(|i| i.resume_ms() > 0)
                 .collect();
             items.sort_by_key(|i| std::cmp::Reverse(i.watch.updated_at));
             items.truncate(10);

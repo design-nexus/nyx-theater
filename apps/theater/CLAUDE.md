@@ -23,8 +23,15 @@
   never overwrites newer local progress.
 - `catalog.rs`: the worker that prepares grids, Home/Discover and search (latest-only
   mailbox, 250 ms coalescing). `library::schedule` hands it `servers::items()` only when
-  the catalog is dirty; watch progress marks it dirty at most every 30 s
-  (`WATCH_REFRESH_SECS`).
+  the catalog is dirty. Watch progress (at most every `WATCH_REFRESH_SECS`) goes as
+  `Request.watch` and is patched into the published `Snapshot`; only a watched/unwatched
+  flip or an unknown title rebuilds. Sync batches rebuild at most every
+  `sync::BATCH_REFRESH`. Look titles up with `servers::matching` or `catalog::snapshot()`,
+  never by cloning `servers::items()`.
+- Memory: `main` caps glibc at 2 arenas and `trim_heap()` runs after a sync and a full
+  catalog rebuild. Artwork off screen for `RELEASE_AFTER_SECS` drops its texture.
+- `mini_player.rs`: the live-video card shown while browsing with a video loaded.
+- Test copies: `THEATER_APP_ID` overrides the application id.
 - `view_cache.rs`: prepared page snapshots, shown before live data; the newest 48 are kept.
 - `artwork.rs`: two disk readers, three network workers, JPEG (PNG with alpha) under
   `~/.cache/nyx-theater/artwork/*.img`, 512 MiB LRU trim.

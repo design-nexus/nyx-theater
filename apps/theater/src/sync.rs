@@ -11,6 +11,8 @@ use std::collections::HashMap;
 pub const FULL_EVERY: i64 = 24 * 3600;
 /// How far back past the last sync to ask, for server clocks that disagree with ours.
 pub const SLACK: i64 = 600;
+/// The least time between catalog rebuilds while a sync's batches arrive.
+pub const BATCH_REFRESH: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// A library brought up to date: its titles, and the server's counts.
 pub type Synced = (Vec<MediaItem>, Vec<u64>);

@@ -57,8 +57,9 @@ pub fn playback_watch(item: MediaItem, revision: i64) {
     if !prefs::get().plex.is_some_and(|p| p.server == item.id.server) {
         return;
     }
+    let (id, watch) = (item.id.clone(), item.watch.clone());
     if STATE.with(|s| s.borrow_mut().catalog.record(item, revision)) {
-        crate::library::watch_changed()
+        crate::library::watch_changed(id, watch)
     }
 }
 pub fn client() -> Option<Client> {
@@ -66,6 +67,9 @@ pub fn client() -> Option<Client> {
 }
 pub fn items() -> Vec<MediaItem> {
     STATE.with(|s| s.borrow().items.clone())
+}
+pub fn with_items<R>(f: impl FnOnce(&[MediaItem]) -> R) -> R {
+    STATE.with(|s| f(&s.borrow().items))
 }
 pub fn connection_state() -> crate::servers::ConnectionState {
     STATE.with(|s| {
@@ -277,7 +281,7 @@ fn sync(full: bool) {
             let saved = credentials::load(&settings.address).and_then(|secret| Client::reconnect(&settings.address, secret, &client_id));
             let client = match saved {
                 Ok(client) => client,
-                // The server moved (a new address) or its token was replaced.
+                // The server moved (a new address), or its token was replaced or isn't saved there.
                 Err(e @ (ProviderError::Offline | ProviderError::AuthenticationRequired)) => match rediscover(&settings, &client_id) {
                     Some(Ok(client)) => client,
                     _ => return Err(e),
@@ -297,7 +301,6 @@ fn sync(full: bool) {
                 .unwrap_or_default();
             publish(RefreshEvent::Batch(continuing.clone()))?;
             let mut all = Vec::new();
-            let cached = cache.all_items(client.server_id()).unwrap_or_default();
             for library in &libraries {
                 let mut batch = |items| publish(RefreshEvent::Batch(items));
                 let marks = cache.sync_marks(client.server_id(), &library.id).ok().flatten();
@@ -332,7 +335,7 @@ fn sync(full: bool) {
                     // One library failing keeps the others; its cached titles stay.
                     Err(e) => {
                         publish(RefreshEvent::Skipped(library.title.clone(), e.to_string()))?;
-                        all.extend(cached.iter().filter(|i| i.library_id == library.id).cloned());
+                        all.extend(cache.items(client.server_id(), &library.id).unwrap_or_default());
                         continue;
                     }
                 };
@@ -369,6 +372,7 @@ fn sync(full: bool) {
     });
     glib::spawn_future_local(async move {
         let mut connected = false;
+        let mut shown = std::time::Instant::now();
         while let Ok(event) = receive.recv().await {
             if !current(generation) || !prefs::get().plex.is_some_and(|p| p.server == server) {
                 break;
@@ -429,6 +433,10 @@ fn sync(full: bool) {
                     STATE.with(|s| merge_items(&mut s.borrow_mut(), items));
                     let count = STATE.with(|s| s.borrow().items.len());
                     window::status(&format!("Loading Plex libraries · {count} titles"));
+                    // Each refresh rebuilds the whole catalog, so batches only show now and then.
+                    if shown.elapsed() < crate::sync::BATCH_REFRESH {
+                        continue;
+                    }
                 }
                 RefreshEvent::Finished(result) => {
                     finish(generation);
@@ -438,6 +446,7 @@ fn sync(full: bool) {
                                 let mut state = s.borrow_mut();
                                 state.catalog.finish(&server, items, started);
                             });
+                            crate::trim_heap();
                             let (count, skipped) = STATE.with(|s| (s.borrow().items.len(), s.borrow().skipped.clone()));
                             if skipped.is_empty() {
                                 window::status(&format!("Plex connected · {count} titles"));
@@ -457,6 +466,7 @@ fn sync(full: bool) {
                     break;
                 }
             }
+            shown = std::time::Instant::now();
             crate::library::refresh();
         }
     });

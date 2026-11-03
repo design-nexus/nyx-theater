@@ -10,6 +10,8 @@ struct Ui {
     body: gtk::Box,
     lists: Vec<Playlist>,
     selected: Option<String>,
+    /// The playlist back last closed, which forward reopens.
+    closed: Option<String>,
     query: String,
     generation: u64,
 }
@@ -26,7 +28,7 @@ thread_local! {
 pub fn build(stack: &gtk::Stack) {
     let page = widgets::page("playlists");
     stack.add_named(&page.root, Some("playlists"));
-    UI.with(|ui| *ui.borrow_mut() = Some(Ui { body: page.body, lists: vec![], selected: None, query: String::new(), generation: 0 }));
+    UI.with(|ui| *ui.borrow_mut() = Some(Ui { body: page.body, lists: vec![], selected: None, closed: None, query: String::new(), generation: 0 }));
 }
 pub fn search(query: &str) {
     UI.with(|ui| if let Some(ui) = ui.borrow_mut().as_mut() { ui.query = query.trim().to_lowercase(); });
@@ -164,10 +166,45 @@ fn reload(network: bool) {
         }
     });
 }
+pub fn has_selection() -> bool {
+    UI.with(|ui| ui.borrow().as_ref().is_some_and(|ui| ui.selected.is_some()))
+}
+/// Back from an open playlist to all of them.
+pub fn close_selection() {
+    let closed = UI.with(|ui| {
+        let mut ui = ui.borrow_mut();
+        let ui = ui.as_mut()?;
+        let id = ui.selected.take()?;
+        ui.closed = Some(id);
+        Some(())
+    });
+    if closed.is_some() {
+        render();
+    }
+}
+/// Forward into the playlist back last closed; false if there's none to reopen.
+pub fn reopen() -> bool {
+    let list = UI.with(|ui| {
+        let mut ui = ui.borrow_mut();
+        let ui = ui.as_mut()?;
+        let id = ui.closed.take()?;
+        ui.lists.iter().find(|list| list.id == id).cloned()
+    });
+    match list {
+        Some(list) => {
+            open(list);
+            true
+        }
+        None => false,
+    }
+}
 /// Show one playlist (or, with None, all of them); nothing if the page has gone.
 fn select(id: Option<String>) {
     UI.with(|ui| {
         if let Some(ui) = ui.borrow_mut().as_mut() {
+            if id.is_some() {
+                ui.closed = None;
+            }
             ui.selected = id;
         }
     });
@@ -186,10 +223,7 @@ fn render() {
         header.add_css_class("theater-playlist-header");
         let title_row = widgets::hbox(10);
         let back = nyx_ui::widgets::icon_button("go-previous-symbolic", "All playlists");
-        back.connect_clicked(|_| {
-            select(None);
-            render();
-        });
+        back.connect_clicked(|_| window::back());
         title_row.append(&back);
         let title = widgets::label(&list.title, "card-title");
         title.set_hexpand(true);

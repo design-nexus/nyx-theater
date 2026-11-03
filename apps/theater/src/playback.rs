@@ -631,6 +631,10 @@ impl Playback {
             self.requested_server = None;
         }
     }
+    /// The server title playing or about to; None for a local file.
+    pub fn media(&self) -> Option<&MediaItem> {
+        self.remote.as_ref().map(|r| &r.media).or_else(|| self.pending.as_ref().map(|p| &p.item))
+    }
     pub fn has_video(&self) -> bool {
         !self.title.is_empty() && (self.loaded || self.remote.is_some() || self.pending.is_some())
     }

@@ -327,7 +327,7 @@ pub fn related(body: &gtk::Box, i: &MediaItem) {
     let item = i.clone();
     let snapshot = crate::catalog::snapshot();
     nyx_core::cmd::background(
-        move || related_rows(&item, snapshot.items().cloned().collect()),
+        move || related_rows(&item, &snapshot),
         move |rows| {
             if library::detail_generation() != generation {
                 return;
@@ -340,26 +340,23 @@ pub fn related(body: &gtk::Box, i: &MediaItem) {
         },
     );
 }
-fn related_rows(i: &MediaItem, mut all: Vec<MediaItem>) -> Vec<(String, Vec<MediaItem>)> {
+/// The snapshot's titles are already grouped and enriched; read them, don't copy them.
+fn related_rows(i: &MediaItem, snapshot: &crate::catalog::Snapshot) -> Vec<(String, Vec<MediaItem>)> {
     let mut rows = vec![];
-    for item in &mut all {
-        metadata::apply(item);
-    }
     let parent = match i.kind {
         MediaKind::Series => Some(i.id.clone()),
         MediaKind::Season | MediaKind::Episode => i.series.clone().or_else(|| i.parent.clone()),
         _ => None,
     };
-    let current = parent.as_ref().and_then(|id| all.iter().find(|s| &s.id == id)).unwrap_or(i);
-    let groups = nyx_media_model::index::unify(all.clone());
-    let excluded: std::collections::HashSet<_> = groups
+    let current = parent.as_ref().and_then(|id| snapshot.get(id)).unwrap_or(i);
+    let excluded: std::collections::HashSet<_> = snapshot
         .iter()
         .filter(|g| g.sources.iter().any(|s| s.id == current.id || s.id == i.id))
         .flat_map(|g| g.sources.iter().map(|s| s.id.clone()))
         .collect();
     let credits = i.metadata.credits.iter().chain(current.metadata.credits.iter()).collect::<Vec<_>>();
     let mut cast_candidates: std::collections::HashMap<ItemId, std::collections::HashSet<String>> = Default::default();
-    for entry in &all {
+    for entry in snapshot.items() {
         if !entry.metadata.credits.iter().any(|c| credits.iter().any(|p| p.name.eq_ignore_ascii_case(&c.name))) {
             continue;
         }
@@ -383,7 +380,7 @@ fn related_rows(i: &MediaItem, mut all: Vec<MediaItem>) -> Vec<(String, Vec<Medi
     }
     let mut more_candidates = vec![];
     let mut related_titles = vec![];
-    for group in groups {
+    for group in snapshot.iter() {
         if group.sources.iter().any(|s| excluded.contains(&s.id)) {
             continue;
         }
@@ -395,9 +392,9 @@ fn related_rows(i: &MediaItem, mut all: Vec<MediaItem>) -> Vec<(String, Vec<Medi
             more_candidates.push(entry.clone());
         }
         if let Some(entry) =
-            group.sources.into_iter().find(|s| s.kind == current.kind && matches!(s.kind, MediaKind::Movie | MediaKind::Series))
+            group.sources.iter().find(|s| s.kind == current.kind && matches!(s.kind, MediaKind::Movie | MediaKind::Series))
         {
-            related_titles.push(entry);
+            related_titles.push(entry.clone());
         }
     }
     let all = related_titles;
@@ -479,17 +476,14 @@ fn person(credit: Credit, origin: MediaItem) {
     let snapshot = crate::catalog::snapshot();
     nyx_core::cmd::background(
         move || {
-            let mut items: Vec<_> = snapshot.items().cloned().collect();
-            for i in &mut items {
-                metadata::apply(i);
-            }
-            let mut owned: Vec<_> = nyx_media_model::index::unify(items)
-                .into_iter()
-                .filter_map(|g| g.sources.into_iter().next())
+            let mut owned: Vec<_> = snapshot
+                .iter()
+                .filter_map(|g| g.sources.first())
                 .filter(|i| {
                     matches!(i.kind, MediaKind::Movie | MediaKind::Series)
                         && i.metadata.credits.iter().any(|c| c.name.eq_ignore_ascii_case(&name))
                 })
+                .cloned()
                 .collect();
             owned.sort_by_key(|i| std::cmp::Reverse(i.year));
             owned
@@ -516,8 +510,7 @@ fn person(credit: Credit, origin: MediaItem) {
             let lookup: std::collections::HashMap<_, _> = snapshot
                 .items()
                 .filter(|i| matches!(i.kind, MediaKind::Movie | MediaKind::Series))
-                .cloned()
-                .filter_map(|i| Some(((i.kind == MediaKind::Series, i.external_ids.tmdb.clone()?.parse::<u64>().ok()?), i)))
+                .filter_map(|i| Some(((i.kind == MediaKind::Series, i.external_ids.tmdb.as_deref()?.parse::<u64>().ok()?), i.clone())))
                 .collect();
             let films = std::mem::take(&mut person.titles)
                 .into_iter()
@@ -611,7 +604,8 @@ mod related_tests {
         let other = item("3", "show", "300", None, false);
         let guest = item("4", "episode", "400", Some("3"), true);
         let movie = item("5", "movie", "500", None, true);
-        let rows = related_rows(&episode, vec![show.clone(), episode.clone(), duplicate, other.clone(), guest, movie.clone()]);
+        let snapshot = crate::catalog::Snapshot::of(vec![show.clone(), episode.clone(), duplicate, other.clone(), guest, movie.clone()]);
+        let rows = related_rows(&episode, &snapshot);
         let titles = &rows.iter().find(|(name, _)| name == "More with Actor").unwrap().1;
         assert!(titles.iter().all(|i| matches!(i.kind, MediaKind::Movie | MediaKind::Series)));
         assert!(titles.iter().any(|i| i.id == other.id));

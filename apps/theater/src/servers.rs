@@ -109,6 +109,12 @@ pub fn any_configured() -> bool {
 pub fn items() -> Vec<MediaItem> {
     plex::items().into_iter().chain(jellyfin::items()).collect()
 }
+/// The titles `keep` accepts, copying only those, not the whole library.
+pub fn matching(keep: impl Fn(&MediaItem) -> bool) -> Vec<MediaItem> {
+    let mut found = plex::with_items(|items| items.iter().filter(|i| keep(i)).cloned().collect::<Vec<_>>());
+    found.extend(jellyfin::with_items(|items| items.iter().filter(|i| keep(i)).cloned().collect::<Vec<_>>()));
+    found
+}
 pub fn latest_watch(item: MediaItem) -> MediaItem {
     match item.id.server.provider {
         ProviderKind::Plex => plex::latest_watch(item),

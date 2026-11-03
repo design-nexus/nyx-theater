@@ -85,13 +85,13 @@ fn discovery(items: &[MediaItem], year: i64, seed: u64) -> Vec<Vec<MediaItem>> {
         .collect()
 }
 fn continuing(item: &MediaItem) -> bool {
-    item.watch.position_ms > 0
-        && item.duration_ms.is_none_or(|duration| item.watch.position_ms < duration.saturating_mul(95) / 100)
-        && matches!(item.kind, MediaKind::Movie | MediaKind::Episode)
+    item.resume_ms() > 0 && matches!(item.kind, MediaKind::Movie | MediaKind::Episode)
 }
 pub struct Request {
     pub generation: u64,
     pub items: Option<Vec<MediaItem>>,
+    /// Playback progress to lay over the catalog without sending it again.
+    pub watch: Vec<(ItemId, WatchState)>,
     pub page: String,
     pub filter: String,
     pub query: String,
@@ -151,7 +151,10 @@ impl Worker {
                 let scope = request.cache_scope.clone();
                 let loading = request.loading;
                 let root = crate::view_cache::root();
-                if request.items.is_some() { prepared.clear(); prepared_order.clear(); }
+                let rebuilt = request.items.is_some();
+                // Progress alone changes a few titles; the saved page can catch up at the next rebuild.
+                let save = rebuilt || request.watch.is_empty();
+                if rebuilt || !request.watch.is_empty() { prepared.clear(); prepared_order.clear(); }
                 if let Some(key) = scope.as_ref()
                     && request.items.is_none()
                     && let Some(cached) = prepared.get(key) {
@@ -167,6 +170,9 @@ impl Worker {
                         let _ = tx.try_send(cached);
                     }
                 let view = index.prepare(request);
+                if rebuilt {
+                    crate::trim_heap();
+                }
                 let empty = view.items.is_empty()
                     && view.home.as_ref().is_none_or(|h| {
                         h.featured.is_none()
@@ -187,14 +193,14 @@ impl Worker {
                         prepared_order.push_back(key.clone());
                     }
                     prepared.insert(key.clone(), view.clone());
-                    while prepared_order.len() > 8 {
+                    while prepared_order.len() > 3 {
                         if let Some(old) = prepared_order.pop_front() { prepared.remove(&old); }
                     }
                 }
                 if tx.try_send(view.clone()).is_err() {
                     break;
                 }
-                if let Some(key) = scope { let _ = save_tx.try_send((key, view)); }
+                if let Some(key) = scope.filter(|_| save) { let _ = save_tx.try_send((key, view)); }
             }
         });
         (worker, rx)
@@ -204,8 +210,13 @@ impl Worker {
         if state.stopped {
             return;
         }
-        if request.items.is_none() {
-            request.items = state.request.as_mut().and_then(|old| old.items.take());
+        if let Some(old) = state.request.as_mut() {
+            if request.items.is_none() {
+                request.items = old.items.take();
+            }
+            let mut watch = std::mem::take(&mut old.watch);
+            watch.append(&mut request.watch);
+            request.watch = watch;
         }
         state.request = Some(request);
         self.0.1.notify_one();
@@ -218,7 +229,7 @@ impl Worker {
     }
 }
 /// Immutable worker-built catalog: detail clicks clone an Arc, never the whole library.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Snapshot {
     groups: Vec<UnifiedItem>,
     by_id: HashMap<ItemId, usize>,
@@ -248,6 +259,20 @@ impl Snapshot {
     pub fn items(&self) -> impl Iterator<Item = &MediaItem> {
         self.groups.iter().flat_map(|g| g.sources.iter())
     }
+    #[cfg(test)]
+    pub fn of(items: Vec<MediaItem>) -> Self {
+        Self::new(unify(items))
+    }
+    pub fn get(&self, id: &ItemId) -> Option<&MediaItem> {
+        self.by_id.get(id).and_then(|&g| self.groups[g].sources.iter().find(|i| i.id == *id))
+    }
+    fn set_watch(&mut self, id: &ItemId, watch: &WatchState) {
+        if let Some(&g) = self.by_id.get(id)
+            && let Some(item) = self.groups[g].sources.iter_mut().find(|i| i.id == *id)
+        {
+            item.watch = watch.clone();
+        }
+    }
     pub fn sources(&self, item: &MediaItem) -> Vec<MediaItem> {
         let mut sources = self.by_id.get(&item.id).map(|&g| self.groups[g].sources.clone()).unwrap_or_default();
         if let Some(existing) = sources.iter_mut().find(|i| i.id == item.id) {
@@ -274,6 +299,22 @@ struct Index {
     series: HashMap<ItemId, String>,
 }
 impl Index {
+    /// Lay progress over the published snapshot in place. Only if a reader is still
+    /// holding the old one does this copy it.
+    fn patch_watch(&mut self, watch: &[(ItemId, WatchState)]) {
+        let mut published = SNAPSHOT.get_or_init(Default::default).write().unwrap();
+        *published = Arc::default();
+        let mut snapshot = std::mem::take(&mut self.groups);
+        if Arc::get_mut(&mut snapshot).is_none() {
+            snapshot = Arc::new((*snapshot).clone());
+        }
+        let groups = Arc::get_mut(&mut snapshot).expect("an unshared snapshot");
+        for (id, state) in watch {
+            groups.set_watch(id, state);
+        }
+        *published = snapshot.clone();
+        self.groups = snapshot;
+    }
     fn prepare(&mut self, request: Request) -> View {
         if let Some(mut items) = request.items {
             crate::metadata::submit(&items, &request.page);
@@ -286,6 +327,9 @@ impl Index {
                 items.iter().filter(|i| i.kind == MediaKind::Series).map(|i| (i.id.clone(), i.title.to_lowercase())).collect();
             self.groups = Arc::new(Snapshot::new(unify(items)));
             publish(self.groups.clone());
+        }
+        if !request.watch.is_empty() {
+            self.patch_watch(&request.watch);
         }
         let select = |group: &UnifiedItem, kind: Option<MediaKind>, resume: bool| {
             group
@@ -301,7 +345,7 @@ impl Index {
                 .min_by_key(|(index, item)| {
                     (
                         !request.online.contains(&item.id.server),
-                        std::cmp::Reverse(!item.watch.watched && item.watch.position_ms > 0),
+                        std::cmp::Reverse(item.resume_ms() > 0),
                         std::cmp::Reverse(item.watch.updated_at),
                         *index,
                     )
@@ -426,6 +470,7 @@ mod tests {
         Request {
             generation,
             items: None,
+            watch: vec![],
             page: "movies".into(),
             filter: String::new(),
             query: String::new(),
@@ -508,6 +553,27 @@ mod tests {
             assert_eq!(index.prepare(request(3)).items.len(), size);
             eprintln!("Prepared {size} titles: {:?}", now.elapsed());
         }
+        let mut index = Index::default();
+        let mut input = request(4);
+        input.items = Some((0..10).map(|n| MediaItem { id: ItemId { id: n.to_string(), ..item.id.clone() }, ..item.clone() }).collect());
+        index.prepare(input);
+        let mut progress = request(5);
+        let id = ItemId { id: "7".into(), ..item.id.clone() };
+        let watch = WatchState { position_ms: 42_000, watched: false, updated_at: Some(9) };
+        progress.watch = vec![(id.clone(), watch.clone())];
+        let view = index.prepare(progress);
+        assert_eq!(index.groups.get(&id).unwrap().watch, watch);
+        assert_eq!(view.items.iter().find(|i| i.id == id).unwrap().watch, watch);
+    }
+    #[test]
+    fn pending_progress_survives_a_newer_request() {
+        let mailbox = Worker(Arc::new((Mutex::new(Mailbox::default()), Condvar::new())));
+        let id = ItemId { server: ServerId { provider: ProviderKind::Plex, id: "s".into() }, id: "1".into() };
+        let mut first = request(1);
+        first.watch = vec![(id.clone(), WatchState::default())];
+        mailbox.submit(first);
+        mailbox.submit(request(2));
+        assert_eq!(mailbox.0.0.lock().unwrap().request.as_ref().unwrap().watch.len(), 1);
     }
 }
 
@@ -524,6 +590,7 @@ mod cached_check {
         let view = index.prepare(Request {
             generation: 1,
             items: Some(items),
+            watch: vec![],
             page: "home".into(),
             filter: String::new(),
             query: String::new(),

@@ -10,6 +10,13 @@ type Result<T> = std::result::Result<T, ProviderError>;
 fn failure() -> ProviderError {
     ProviderError::Failed("Unlock the desktop keyring and make sure libsecret is installed".into())
 }
+fn missing_or_failed(output: &Output) -> ProviderError {
+    if output.status.code() == Some(1) && output.stdout.is_empty() && output.stderr.is_empty() {
+        ProviderError::AuthenticationRequired
+    } else {
+        failure()
+    }
+}
 fn tool(verb: &str, provider: &str, address: &str) -> Command {
     let mut command = Command::new("secret-tool");
     command.arg(verb);
@@ -53,11 +60,18 @@ pub fn save_for(provider: &str, address: &str, secret: &Secret) -> Result<()> {
 pub fn load(address: &str) -> Result<Secret> {
     load_for("plex", address)
 }
+/// `AuthenticationRequired` when nothing is saved for `address` (secret-tool exits 1
+/// silently), so a server that moved can be found again; keyring failures say so on stderr.
 pub fn load_for(provider: &str, address: &str) -> Result<Secret> {
-    let child = tool("lookup", provider, address).stdin(Stdio::null()).stdout(Stdio::piped()).spawn().map_err(|_| failure())?;
+    let child = tool("lookup", provider, address)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|_| failure())?;
     let output = wait_output(child, Duration::from_secs(8))?;
     if !output.status.success() {
-        return Err(failure());
+        return Err(missing_or_failed(&output));
     }
     let value = String::from_utf8(output.stdout).map_err(|_| failure())?;
     Secret::new(value.trim_end_matches('\n').into())
@@ -92,5 +106,14 @@ mod tests {
         let start = Instant::now();
         assert!(wait_output(child, Duration::from_millis(30)).is_err());
         assert!(start.elapsed() < Duration::from_secs(1));
+    }
+    #[test]
+    fn a_missing_token_asks_for_sign_in_and_a_keyring_error_does_not() {
+        let output = |code: i32, stderr: &str| {
+            Command::new("sh").args(["-c", &format!("printf '{stderr}' >&2; exit {code}")]).output().unwrap()
+        };
+        assert_eq!(missing_or_failed(&output(1, "")), ProviderError::AuthenticationRequired);
+        assert_ne!(missing_or_failed(&output(1, "secret-tool: Cannot create an item in a locked collection")), ProviderError::AuthenticationRequired);
+        assert_ne!(missing_or_failed(&output(2, "")), ProviderError::AuthenticationRequired);
     }
 }

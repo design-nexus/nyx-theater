@@ -127,7 +127,7 @@ pub fn sync(page: &str) {
     });
     UPDATING.with(|u| u.set(false));
 }
-fn values(items: &[nyx_media_model::MediaItem], field: &str) -> Vec<String> {
+fn values<'a>(items: impl IntoIterator<Item = &'a nyx_media_model::MediaItem>, field: &str) -> Vec<String> {
     let mut set = BTreeSet::new();
     for i in items {
         let m = &i.metadata;
@@ -360,16 +360,12 @@ pub fn open(page: &str) {
     let snapshot = crate::catalog::snapshot();
     nyx_core::cmd::background(
         move || {
-            let mut items: Vec<_> = snapshot.items().cloned().collect();
-            for i in &mut items {
-                crate::metadata::apply(i);
-            }
             let lists = crate::playlist_store::Store::open().and_then(|s| s.list()).unwrap_or_default();
             let names: BTreeSet<_> = lists.iter().map(|l| l.title.clone()).collect();
             let fields =
                 ["genres", "people", "studios", "collections", "certifications", "status", "audio", "subtitles", "editions"];
-            let mut facets = fields.into_iter().map(|field| (field, values(&items, field))).collect::<HashMap<_, _>>();
-            let years: BTreeSet<_> = items.iter().filter_map(|i| i.year).map(|y| y.to_string()).collect();
+            let mut facets = fields.into_iter().map(|field| (field, values(snapshot.items(), field))).collect::<HashMap<_, _>>();
+            let years: BTreeSet<_> = snapshot.items().filter_map(|i| i.year).map(|y| y.to_string()).collect();
             facets.insert("years", years.into_iter().collect());
             (facets, names.into_iter().collect())
         },

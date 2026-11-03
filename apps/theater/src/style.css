@@ -66,7 +66,6 @@
   text-align: left;
 }
 .theater-window .theater-list-details > box > box { min-width: 0; }
-.theater-window .theater-mini-player progressbar { min-width: 100px; }
 .theater-window box.wide-card { padding: 8px; border-radius: 9px; }
 .theater-window box.wide-card:hover { background: @row_hover; }
 .theater-window .theater-playlist-header { margin: 0 0 16px; }
@@ -157,6 +156,48 @@
   padding: 6px 14px;
 }
 
+
+/* The mini-player: the live picture in a raised card over the pages' corner. */
+.theater-window .theater-mini {
+  background: @theme_popover;
+  border: 1px solid @hairline;
+  border-radius: 14px;
+  box-shadow: 0 10px 32px alpha(@theme_shadow, 0.45), 0 2px 6px alpha(@theme_shadow, 0.25);
+  padding: 0 0 8px;
+}
+.theater-window .theater-mini-video {
+  background: @theme_video;
+  border-radius: 14px 14px 0 0;
+}
+.theater-window .theater-mini-expand {
+  margin: 8px;
+  padding: 6px;
+  border-radius: 999px;
+  color: @theme_on_video;
+  background: alpha(@theme_video, 0.55);
+  opacity: 0;
+  transition: opacity 150ms ease-out;
+}
+.theater-window .theater-mini-video:hover .theater-mini-expand { opacity: 1; }
+.theater-window .theater-mini-info { padding: 10px 14px 0; }
+.theater-window .theater-mini-title { font-weight: 600; }
+.theater-window .theater-mini-subtitle { font-size: 0.86em; color: @theme_dim_text; }
+.theater-window .theater-mini-seek { margin: 4px 6px 0; }
+.theater-window .theater-mini-seek > trough { min-height: 4px; border-radius: 2px; }
+.theater-window .theater-mini-seek > trough > highlight { min-height: 4px; border-radius: 2px; background: @theme_accent; }
+.theater-window .theater-mini-seek > trough > slider { min-width: 12px; min-height: 12px; margin: -5px; opacity: 0; }
+.theater-window .theater-mini-seek:hover > trough > slider { opacity: 1; }
+.theater-window .theater-mini-times { padding: 0 14px; }
+.theater-window .theater-mini-time { font-size: 0.78em; color: @theme_dim_text; font-feature-settings: "tnum"; }
+.theater-window .theater-mini-transport { padding: 2px 8px 0; }
+.theater-window .theater-mini-transport button.theater-mini-play {
+  min-width: 40px;
+  min-height: 40px;
+  border-radius: 999px;
+  background: @theme_accent;
+  color: @theme_on_accent;
+}
+.theater-window .theater-mini-transport button.theater-mini-play:hover { background: mix(@theme_accent, @theme_on_accent, 0.12); }
 
 /* One surface: the sidebar and the pages share the window's background. */
 .theater-window .settings-navigation,

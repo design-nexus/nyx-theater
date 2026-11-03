@@ -30,6 +30,9 @@ pub fn client() -> Option<Client> {
 pub fn items() -> Vec<MediaItem> {
     STATE.with(|s| s.borrow().catalog.items.clone())
 }
+pub fn with_items<R>(f: impl FnOnce(&[MediaItem]) -> R) -> R {
+    STATE.with(|s| f(&s.borrow().catalog.items))
+}
 pub fn latest_watch(item: MediaItem) -> MediaItem {
     STATE.with(|s| s.borrow().catalog.latest(item))
 }
@@ -40,8 +43,9 @@ pub fn playback_watch(item: MediaItem, revision: i64) {
     if !prefs::get().jellyfin.is_some_and(|p| p.server == item.id.server) {
         return;
     }
+    let (id, watch) = (item.id.clone(), item.watch.clone());
     if STATE.with(|s| s.borrow_mut().catalog.record(item, revision)) {
-        library::watch_changed()
+        library::watch_changed(id, watch)
     }
 }
 pub fn connection_state() -> crate::servers::ConnectionState {
@@ -172,7 +176,6 @@ fn sync(full: bool) {
             let continuing = client.continue_page().map(|page| page.items).unwrap_or_default();
             publish(Update::Batch(continuing.clone()))?;
             let mut all = vec![];
-            let cached = cache.all_items(client.server_id()).unwrap_or_default();
             for library in &libraries {
                 let marks = cache.sync_marks(client.server_id(), &library.id).ok().flatten();
                 let sync_started = crate::sync::now_secs();
@@ -216,7 +219,7 @@ fn sync(full: bool) {
                     // One library failing keeps the others; its cached titles stay.
                     Err(e) => {
                         publish(Update::Skipped(library.title.clone(), e.to_string()))?;
-                        all.extend(cached.iter().filter(|i| i.library_id == library.id).cloned());
+                        all.extend(cache.items(client.server_id(), &library.id).unwrap_or_default());
                         continue;
                     }
                 };
@@ -246,6 +249,7 @@ fn sync(full: bool) {
     });
     glib::spawn_future_local(async move {
         let mut connected = false;
+        let mut shown = std::time::Instant::now();
         while let Ok(update) = receive.recv().await {
             if STATE.with(|s| s.borrow().generation) != generation || !prefs::get().jellyfin.is_some_and(|p| p.server == server) {
                 break;
@@ -284,12 +288,17 @@ fn sync(full: bool) {
                         s.catalog.merge(items)
                     });
                     window::status("Jellyfin connected · loading libraries…");
+                    // Each refresh rebuilds the whole catalog, so batches only show now and then.
+                    if shown.elapsed() < crate::sync::BATCH_REFRESH {
+                        continue;
+                    }
                 }
                 Update::Finished(result) => {
                     STATE.with(|s| s.borrow_mut().busy = false);
                     match result {
                         Ok(items) => {
                             STATE.with(|s| s.borrow_mut().catalog.finish(&server, items, started));
+                            crate::trim_heap();
                             window::status("Jellyfin libraries updated")
                         }
                         Err(error) => {
@@ -302,6 +311,7 @@ fn sync(full: bool) {
                     }
                 }
             }
+            shown = std::time::Instant::now();
             library::refresh();
             if done {
                 break;

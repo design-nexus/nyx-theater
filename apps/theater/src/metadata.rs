@@ -130,9 +130,17 @@ pub fn configure(mut c: Config) {
 }
 pub fn submit(items: &[MediaItem], page: &str) {
     if let Some(h) = HUB.get() {
-        let mut items = items.to_vec();
-        items.sort_by_key(|i| !(if page == "tv" { i.kind == MediaKind::Series } else { i.kind == MediaKind::Movie }));
-        h.pending.lock().unwrap().items = Some(items);
+        let mut pending = h.pending.lock().unwrap();
+        // With no service to ask there's nothing to enrich, so no copy of the library to keep.
+        let items = if pending.config.tmdb || pending.config.mdblist {
+            let mut items = items.to_vec();
+            items.sort_by_key(|i| !(if page == "tv" { i.kind == MediaKind::Series } else { i.kind == MediaKind::Movie }));
+            items
+        } else {
+            vec![]
+        };
+        pending.items = Some(items);
+        drop(pending);
         h.wake.notify_one();
     }
 }

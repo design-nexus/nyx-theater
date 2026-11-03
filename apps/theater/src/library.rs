@@ -28,6 +28,8 @@ struct Ui {
     home_parts: Vec<gtk::Box>,
     discover_parts: Vec<gtk::Box>,
     discover_data: crate::catalog::Home,
+    /// Progress waiting to go to the catalog worker with the next request.
+    watch: Vec<(nyx_media_model::ItemId, nyx_media_model::WatchState)>,
 }
 /// The details page on screen: its title, the children shown, and the season picked.
 type Rendered = (MediaItem, Vec<MediaItem>, Option<u32>);
@@ -337,6 +339,7 @@ pub fn build(stack: &gtk::Stack) {
             home_parts,
             discover_parts,
             discover_data: Default::default(),
+            watch: Vec::new(),
         });
     });
     glib::spawn_future_local(async move {
@@ -479,6 +482,7 @@ fn schedule(changed: bool) {
                 u.requested = true;
                 let items = u.dirty.then(servers::items);
                 u.dirty = false;
+                let watch = std::mem::take(&mut u.watch);
                 let online =
                     [plex::client().map(|c| c.server_id().clone()), crate::jellyfin::client().map(|c| c.server_id().clone())]
                         .into_iter()
@@ -489,6 +493,7 @@ fn schedule(changed: bool) {
                     crate::catalog::Request {
                         generation: u.generation,
                         items,
+                        watch,
                         page: u.page.clone(),
                         filter: u.filter.clone(),
                         query: u.query.clone(),
@@ -521,14 +526,24 @@ fn schedule(changed: bool) {
 }
 thread_local! {
     static WATCH_DIRTY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Progress since the last refresh, and whether any of it needs a full rebuild.
+    static WATCH_PENDING: RefCell<Vec<(nyx_media_model::ItemId, nyx_media_model::WatchState)>> = const { RefCell::new(Vec::new()) };
+    static WATCH_FULL: Cell<bool> = const { Cell::new(false) };
     /// When watch changes last refreshed the library, and whether one is waiting.
     static WATCH_REFRESHED: Cell<Option<std::time::Instant>> = const { Cell::new(None) };
     static WATCH_WAITING: Cell<bool> = const { Cell::new(false) };
 }
-/// Seconds between library refreshes for watch progress. Playback reports every 10 s,
-/// and each refresh re-reads every title.
+/// Seconds between library refreshes for watch progress. Playback reports every 10 s.
 const WATCH_REFRESH_SECS: u64 = 2;
-pub fn watch_changed() {
+pub fn watch_changed(id: nyx_media_model::ItemId, watch: nyx_media_model::WatchState) {
+    // Watched or unwatched changes a show's counts, and a title the catalog doesn't
+    // have yet must be added; only a full rebuild does either.
+    let progress_only = crate::catalog::snapshot().get(&id).is_some_and(|item| item.watch.watched == watch.watched);
+    if progress_only {
+        WATCH_PENDING.with(|p| p.borrow_mut().push((id, watch)));
+    } else {
+        WATCH_FULL.set(true);
+    }
     WATCH_DIRTY.with(|dirty| dirty.set(true));
     if prefs::get().last_section == "playing" || WATCH_WAITING.with(Cell::get) {
         return;
@@ -555,7 +570,17 @@ pub fn refresh_watch() {
     if !WATCH_DIRTY.with(|dirty| dirty.replace(false)) {
         return;
     }
-    refresh();
+    let pending = WATCH_PENDING.with(|p| std::mem::take(&mut *p.borrow_mut()));
+    if WATCH_FULL.replace(false) {
+        refresh();
+    } else {
+        UI.with(|u| {
+            if let Some(u) = u.borrow_mut().as_mut() {
+                u.watch.extend(pending);
+            }
+        });
+        schedule(false);
+    }
     let current = CURRENT.with(|c| c.borrow().clone());
     if let Some(item) = current.filter(|i| matches!(i.kind, MediaKind::Movie | MediaKind::Episode)) {
         let item = servers::latest_watch(item);
@@ -755,7 +780,7 @@ fn hero(item: &MediaItem, actions: bool) -> gtk::Overlay {
         let buttons = widgets::hbox(8);
         let play = widgets::labeled_button(
             "media-playback-start-symbolic",
-            if item.watch.position_ms > 0 { "Resume" } else { "Play" },
+            if item.resume_ms() > 0 { "Resume" } else { "Play" },
         );
         play.add_css_class("suggested-action");
         let current = item.clone();
@@ -1215,7 +1240,7 @@ fn resolve_choice(item: &MediaItem, choice: &PlaybackChoice) -> Option<(MediaIte
                         && !version.parts.is_empty()
                         && edition_key(version.edition.as_deref()) == *edition
                     {
-                        let resume = !source.watch.watched && source.watch.position_ms > 0;
+                        let resume = source.resume_ms() > 0;
                         let rank = (
                             std::cmp::Reverse(resume),
                             std::cmp::Reverse(if resume { source.watch.updated_at } else { None }),
@@ -1234,7 +1259,7 @@ fn resolve_choice(item: &MediaItem, choice: &PlaybackChoice) -> Option<(MediaIte
 fn choice_has_progress(item: &MediaItem, choice: &PlaybackChoice) -> bool {
     resolve_choice(item, choice)
         .map(|(source, _)| servers::latest_watch(source))
-        .is_some_and(|source| source.watch.position_ms > 0 && !source.watch.watched)
+        .is_some_and(|source| source.resume_ms() > 0)
 }
 struct Fallback {
     sources: Vec<(MediaItem, String)>,
@@ -1277,9 +1302,8 @@ pub fn next_episode(episode: &MediaItem) -> Option<MediaItem> {
     }
     let series = episode.series.as_ref()?;
     let here = (episode.season_number?, episode.episode_number?);
-    servers::items()
+    servers::matching(|i| i.kind == MediaKind::Episode && i.series.as_ref() == Some(series) && i.id.server == episode.id.server)
         .into_iter()
-        .filter(|i| i.kind == MediaKind::Episode && i.series.as_ref() == Some(series) && i.id.server == episode.id.server)
         .filter_map(|i| Some(((i.season_number?, i.episode_number?), i)))
         .filter(|((s, _), _)| *s > 0 || here.0 == 0)
         .filter(|(at, _)| *at > here)
@@ -1307,11 +1331,7 @@ fn episode_show(episode: &MediaItem) -> Option<MediaItem> {
         .items()
         .find(|item| item.id == *series_id && item.kind == MediaKind::Series)
         .cloned()
-        .or_else(|| {
-            servers::items()
-                .into_iter()
-                .find(|item| item.id == *series_id && item.kind == MediaKind::Series)
-        })
+        .or_else(|| servers::matching(|item| item.id == *series_id && item.kind == MediaKind::Series).into_iter().next())
 }
 
 fn attach_item_menu(widget: &impl IsA<gtk::Widget>, item: &MediaItem, show_details: bool) {
@@ -1364,7 +1384,7 @@ fn show_item_menu(anchor: &gtk::Widget, x: f64, y: f64, item: MediaItem, show_de
     if matches!(item.kind, MediaKind::Movie | MediaKind::Episode | MediaKind::Series | MediaKind::Season) {
         let label = if item.kind == MediaKind::Series || item.kind == MediaKind::Season {
             "Play next"
-        } else if item.watch.position_ms > 0 && !item.watch.watched {
+        } else if item.resume_ms() > 0 {
             "Resume"
         } else {
             "Play"
@@ -1526,7 +1546,7 @@ fn start_playback(item: MediaItem, version: String, from_start: bool, choice: &s
     }
     let Some(request_id) = window::begin_playback_request(item.id.server.clone()) else { return };
     window::status(&format!("Opening {} video…", client.label()));
-    let resume_ms = resume.unwrap_or(if from_start || item.watch.watched { 0 } else { item.watch.position_ms });
+    let resume_ms = resume.unwrap_or(if from_start { 0 } else { item.resume_ms() });
     let mode = if choice == "transcode" { PlaybackMode::Transcode } else { PlaybackMode::Direct };
     let auto_transcode = choice == "auto";
     let (c, i, selected) = (client.clone(), item.clone(), version.clone());

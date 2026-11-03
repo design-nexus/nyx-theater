@@ -15,6 +15,8 @@ struct Ui {
     /// The header (hidden in full screen) and its subtitle, the page you're on.
     header: gtk::WindowHandle,
     subtitle: gtk::Label,
+    /// The sidebar's toggle, hidden with the sidebar on the player page.
+    collapse: gtk::Button,
     buttons: Vec<(&'static str, &'static str, gtk::Button)>,
 }
 thread_local! {
@@ -182,7 +184,12 @@ pub fn build(app: &gtk::Application) {
         label.set_ellipsize(gtk::pango::EllipsizeMode::End);
         content.append(&label);
         button.set_child(Some(&content));
-        button.connect_clicked(move |_| navigate(id));
+        button.connect_clicked(move |_| {
+            if id == "playlists" {
+                crate::playlists::close_selection();
+            }
+            navigate(id);
+        });
         list.append(&button);
         buttons.push((id, title, button));
     }
@@ -248,33 +255,6 @@ pub fn build(app: &gtk::Application) {
     header.start.append(&collapse);
     header.center.append(&search);
     let bar = header.end.clone();
-    let return_video = nyx_ui::widgets::bar_button("media-playback-start-symbolic", "Return to playback");
-    return_video.connect_clicked(|_| navigate("playing"));
-    return_video.set_visible(false);
-    bar.append(&return_video);
-    let mini = widgets::hbox(6);
-    mini.add_css_class("theater-mini-player");
-    let mini_title = widgets::label("", "status-readout");
-    mini_title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    mini_title.set_max_width_chars(20);
-    let mini_progress = gtk::ProgressBar::new();
-    mini_progress.set_size_request(100, -1);
-    let mini_back = nyx_ui::widgets::icon_button("media-seek-backward-symbolic", "Seek back");
-    let mini_play = nyx_ui::widgets::icon_button("media-playback-pause-symbolic", "Play or pause");
-    let mini_fwd = nyx_ui::widgets::icon_button("media-seek-forward-symbolic", "Seek forward");
-    for (button, direction) in [(&mini_back, -1.0), (&mini_fwd, 1.0)] {
-        let player = player.clone();
-        button.connect_clicked(move |_| player.borrow().seek_by(direction * prefs::get().seek_seconds as f64));
-    }
-    let mini_player = player.clone();
-    mini_play.connect_clicked(move |_| mini_player.borrow().toggle());
-    mini.append(&mini_title);
-    mini.append(&mini_progress);
-    mini.append(&mini_back);
-    mini.append(&mini_play);
-    mini.append(&mini_fwd);
-    mini.set_visible(false);
-    bar.append(&mini);
     let open = nyx_ui::widgets::bar_button("document-open-symbolic", "Open a video file (Ctrl+O)");
     open.connect_clicked(|_| open_file());
     bar.append(&open);
@@ -282,27 +262,6 @@ pub fn build(app: &gtk::Application) {
     refresh.connect_clicked(|_| crate::servers::refresh());
     bar.append(&refresh);
     bar.append(&chrome::settings_button(settings::open));
-    let weak = return_video.downgrade();
-    let weak_mini = mini.downgrade();
-    let weak_player = Rc::downgrade(&player);
-    glib::timeout_add_local(std::time::Duration::from_secs(1), move || {
-        let (Some(button), Some(mini), Some(player)) = (weak.upgrade(), weak_mini.upgrade(), weak_player.upgrade()) else { return glib::ControlFlow::Break };
-        if is_closing() {
-            return glib::ControlFlow::Break;
-        }
-        let p = player.borrow();
-        let loaded = p.has_video();
-        crate::inhibit::set_playing(loaded && !p.paused);
-        let browsing = page() != "playing";
-        button.set_visible(loaded && browsing);
-        mini.set_visible(loaded && browsing);
-        if loaded {
-            mini_title.set_text(&p.title);
-            mini_progress.set_fraction(if p.duration() > 0.0 { (p.position / p.duration()).clamp(0.0, 1.0) } else { 0.0 });
-            mini_play.set_icon_name(if p.paused { "media-playback-start-symbolic" } else { "media-playback-pause-symbolic" });
-        }
-        glib::ControlFlow::Continue
-    });
     let frame = widgets::vbox(0);
     frame.add_css_class("window-frame");
     frame.append(&header.root);
@@ -315,6 +274,7 @@ pub fn build(app: &gtk::Application) {
     probe.set_can_focus(false);
     overlay.add_overlay(&probe);
     overlay.set_measure_overlay(&probe, false);
+    crate::mini_player::build(&overlay, &player);
     probe.connect_resize(|_, _, _| {
         glib::idle_add_local_once(apply_width);
     });
@@ -398,7 +358,7 @@ pub fn build(app: &gtk::Application) {
                 } else {
                     w.remove_css_class("fullscreen");
                 }
-                u.nav.set_visible(!full);
+                u.nav.set_visible(!full && u.stack.visible_child_name().as_deref() != Some("playing"));
                 u.header.set_visible(!full);
             }
         });
@@ -428,6 +388,7 @@ pub fn build(app: &gtk::Application) {
             player,
             header: header.root.clone(),
             subtitle: header.subtitle.clone(),
+            collapse,
             buttons,
         })
     });
@@ -497,6 +458,8 @@ fn show_page(id: &str) {
         if let Some(u) = u.borrow().as_ref() {
             let id = if u.stack.child_by_name(id).is_some() { id } else { "home" };
             u.stack.set_visible_child_name(id);
+            u.nav.set_visible(id != "playing" && !u.window.is_fullscreen());
+            u.collapse.set_visible(id != "playing");
             let mut title = match id {
                 "details" => "Details",
                 "playing" => "Playback",
@@ -569,6 +532,11 @@ pub fn back() {
         NAV_FORWARD.with(|h| h.borrow_mut().push(("details".into(), item)));
         return;
     }
+    if page() == "playlists" && crate::playlists::has_selection() {
+        crate::playlists::close_selection();
+        NAV_FORWARD.with(|h| h.borrow_mut().push(("playlist".into(), None)));
+        return;
+    }
     back_from_details();
 }
 pub fn back_from_details() {
@@ -589,6 +557,13 @@ pub fn back_from_details() {
 }
 pub fn forward() {
     if let Some((next, item)) = NAV_FORWARD.with(|h| h.borrow_mut().pop()) {
+        // Reopening a playlist stays on the playlists page, so history doesn't change.
+        if next == "playlist" {
+            if page() == "playlists" {
+                crate::playlists::reopen();
+            }
+            return;
+        }
         let remaining = NAV_FORWARD.with(|h| h.borrow().clone());
         let current = page();
         NAV_HISTORY.with(|h| h.borrow_mut().push(current));

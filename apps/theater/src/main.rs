@@ -9,6 +9,7 @@ mod inhibit;
 mod jellyfin;
 mod library;
 mod metadata;
+mod mini_player;
 mod now_playing;
 mod navigation;
 mod playback;
@@ -31,7 +32,18 @@ mod window;
 
 use gtk::{gio, glib, prelude::*};
 
+/// Hand freed heap back to the system after a large library rebuild; glibc otherwise
+/// keeps the high-water mark of every arena.
+pub fn trim_heap() {
+    // SAFETY: malloc_trim only releases free pages; it's safe from any thread.
+    unsafe { libc::malloc_trim(0) };
+}
+
 fn main() -> glib::ExitCode {
+    // Every worker thread would otherwise get its own 64 MiB glibc arena, and the
+    // library's churn leaves each one fragmented and full.
+    // SAFETY: called before any other thread exists.
+    unsafe { libc::mallopt(libc::M_ARENA_MAX, 2) };
     nyx_core::app::init(nyx_core::app::App { slug: "nyx-theater", name: "Theater" });
     if prefs::get().client_id.is_empty() {
         prefs::update(|p| p.client_id = uuid::Uuid::new_v4().to_string());
@@ -47,8 +59,10 @@ fn main() -> glib::ExitCode {
         println!("Usage: nyx-theater [--section home|discover|movies|tv|collections|playlists|settings] [--toggle] [FILE|URI …]");
         return glib::ExitCode::SUCCESS;
     }
+    // A test copy runs under its own id, apart from the instance in use.
+    let id = std::env::var("THEATER_APP_ID").unwrap_or_else(|_| "io.github.design_nexus.nyx.Theater".into());
     let app = gtk::Application::builder()
-        .application_id("io.github.design_nexus.nyx.Theater")
+        .application_id(id)
         .flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE)
         .build();
     // Nyx Assistant finds and plays titles through this (primary instance only).

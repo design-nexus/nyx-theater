@@ -113,6 +113,15 @@ pub struct MediaItem {
     pub versions: Vec<MediaVersion>,
     pub watch: WatchState,
 }
+impl MediaItem {
+    /// Where playback picks up: the saved position while it's short of the last 5%,
+    /// even on a title the server counts as watched (a rewatch in progress).
+    pub fn resume_ms(&self) -> u64 {
+        let position = self.watch.position_ms;
+        let unfinished = self.duration_ms.is_none_or(|duration| position < duration.saturating_mul(95) / 100);
+        if position > 0 && unfinished { position } else { 0 }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Library {
@@ -262,5 +271,42 @@ impl Secret {
 impl std::fmt::Debug for Secret {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Secret([redacted])")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn rewatches_resume_and_finished_titles_restart() {
+        let mut item = MediaItem {
+            id: ItemId { server: ServerId { provider: ProviderKind::Plex, id: "s".into() }, id: "1".into() },
+            library_id: "1".into(),
+            kind: MediaKind::Movie,
+            title: "Movie".into(),
+            tv: Default::default(),
+            metadata: Default::default(),
+            summary: String::new(),
+            year: None,
+            external_ids: Default::default(),
+            parent: None,
+            series: None,
+            season_number: None,
+            episode_number: None,
+            duration_ms: Some(100_000),
+            added_at: None,
+            poster: None,
+            backdrop: None,
+            versions: vec![],
+            watch: WatchState { position_ms: 40_000, watched: true, updated_at: None },
+        };
+        assert_eq!(item.resume_ms(), 40_000);
+        item.watch.position_ms = 96_000;
+        assert_eq!(item.resume_ms(), 0);
+        item.watch.position_ms = 0;
+        assert_eq!(item.resume_ms(), 0);
+        item.duration_ms = None;
+        item.watch.position_ms = 5_000;
+        assert_eq!(item.resume_ms(), 5_000);
     }
 }

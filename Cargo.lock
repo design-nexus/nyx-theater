@@ -1079,6 +1079,7 @@ version = "0.1.0"
 dependencies = [
  "async-channel",
  "gtk4",
+ "libc",
  "nyx-core",
  "nyx-jellyfin",
  "nyx-media-cache",

@@ -15,6 +15,8 @@ pub fn build(player: &Rc<RefCell<Playback>>) -> gtk::Overlay {
     overlay.set_vexpand(true);
     overlay.set_hexpand(true);
     overlay.set_overflow(gtk::Overflow::Hidden);
+    // Holds the keyboard focus on this page so Space reaches the player, not the search field.
+    overlay.set_focusable(true);
     let picture = gtk::Picture::for_paintable(&nyx_playback::video::paintable());
     picture.set_content_fit(gtk::ContentFit::Contain);
     picture.set_can_shrink(true);

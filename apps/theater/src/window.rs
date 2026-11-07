@@ -17,6 +17,8 @@ struct Ui {
     subtitle: gtk::Label,
     /// The sidebar's toggle, hidden with the sidebar on the player page.
     collapse: gtk::Button,
+    /// The way out of the player page, in the toggle's place.
+    back: gtk::Button,
     buttons: Vec<(&'static str, &'static str, gtk::Button)>,
 }
 thread_local! {
@@ -253,6 +255,10 @@ pub fn build(app: &gtk::Application) {
     let collapse = nyx_ui::widgets::bar_button("sidebar-show-symbolic", "Collapse the sidebar (Ctrl+B)");
     collapse.connect_clicked(|_| toggle_sidebar());
     header.start.append(&collapse);
+    let back_button = nyx_ui::widgets::bar_button("go-previous-symbolic", "Back (Alt+Left)");
+    back_button.set_visible(false);
+    back_button.connect_clicked(|_| back());
+    header.start.append(&back_button);
     header.center.append(&search);
     let bar = header.end.clone();
     let open = nyx_ui::widgets::bar_button("document-open-symbolic", "Open a video file (Ctrl+O)");
@@ -315,6 +321,10 @@ pub fn build(app: &gtk::Application) {
                 }
             }),
             gdk::Key::Escape if settings_card::is_open() => settings_card::escape(),
+            gdk::Key::Escape if search_focused() => {
+                hide_search();
+                drop_search_focus();
+            }
             gdk::Key::Escape if UI.with(|u| u.borrow().as_ref().is_some_and(|u| !u.search.text().is_empty())) => {
                 hide_search()
             }
@@ -348,6 +358,25 @@ pub fn build(app: &gtk::Application) {
         glib::Propagation::Stop
     });
     window.add_controller(keys);
+    let outside = gtk::GestureClick::new();
+    outside.set_button(0);
+    outside.set_propagation_phase(gtk::PropagationPhase::Capture);
+    outside.connect_pressed(|g, _, x, y| {
+        let Some(window) = self::window() else { return };
+        // A popover (the field's own menu) is another surface; its clicks aren't outside.
+        if g.current_event().and_then(|e| e.surface()) != window.surface() || !search_focused() {
+            return;
+        }
+        let inside = UI.with(|u| {
+            u.borrow().as_ref().is_some_and(|u| {
+                window.pick(x, y, gtk::PickFlags::DEFAULT).is_some_and(|w| in_search(&w, &u.search))
+            })
+        });
+        if !inside {
+            drop_search_focus();
+        }
+    });
+    window.add_controller(outside);
     crate::navigation::install(&window);
     window.connect_fullscreened_notify(|w| {
         UI.with(|u| {
@@ -389,6 +418,7 @@ pub fn build(app: &gtk::Application) {
             header: header.root.clone(),
             subtitle: header.subtitle.clone(),
             collapse,
+            back: back_button,
             buttons,
         })
     });
@@ -460,6 +490,12 @@ fn show_page(id: &str) {
             u.stack.set_visible_child_name(id);
             u.nav.set_visible(id != "playing" && !u.window.is_fullscreen());
             u.collapse.set_visible(id != "playing");
+            u.back.set_visible(id == "playing");
+            if id == "playing"
+                && let Some(stage) = u.stack.visible_child()
+            {
+                stage.grab_focus();
+            }
             let mut title = match id {
                 "details" => "Details",
                 "playing" => "Playback",
@@ -649,7 +685,7 @@ pub const SHORTCUTS: &[(&[&str], &str)] = &[
     (&["Ctrl", "F"], "Search library"),
     (&["Alt", "←"], "Back · or swipe right with two fingers"),
     (&["Alt", "→"], "Forward · or swipe left with two fingers"),
-    (&["Esc"], "Clear search or close settings"),
+    (&["Esc"], "Clear or leave search, or close settings"),
     (&["Ctrl", "B"], "Collapse sidebar"),
     (&["Ctrl", ","], "Settings"),
     (&["Ctrl", "Shift", "P"], "Command palette"),
@@ -680,6 +716,29 @@ fn show_shortcuts() {
     dialog.present();
 }
 
+fn search_focused() -> bool {
+    UI.with(|u| {
+        u.borrow().as_ref().is_some_and(|u| {
+            gtk::prelude::GtkWindowExt::focus(&u.window).is_some_and(|w| in_search(&w, &u.search))
+        })
+    })
+}
+fn in_search(widget: &gtk::Widget, search: &gtk::SearchEntry) -> bool {
+    widget == search.upcast_ref::<gtk::Widget>() || widget.is_ancestor(search)
+}
+/// Leave the search field; on the player page the player takes the keys again.
+fn drop_search_focus() {
+    UI.with(|u| {
+        if let Some(u) = u.borrow().as_ref() {
+            match u.stack.visible_child().filter(|_| u.stack.visible_child_name().as_deref() == Some("playing")) {
+                Some(stage) => {
+                    stage.grab_focus();
+                }
+                None => gtk::prelude::GtkWindowExt::set_focus(&u.window, None::<&gtk::Widget>),
+            }
+        }
+    });
+}
 fn typing() -> bool {
     window()
         .and_then(|w| gtk::prelude::GtkWindowExt::focus(&w))

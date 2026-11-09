@@ -165,17 +165,15 @@ impl Playback {
                                 p.seek(position);
                                 p.position = position;
                             }
-                            let selected = p
-                                .subtitle_choice
-                                .or_else(|| p.subtitles.iter().find(|track| track.selected).map(|track| track.id));
-                            if let Some(id) = selected {
-                                if id >= 0 && p.burned_subtitle != Some(id) {
+                            match p.preferred_subtitle() {
+                                Some(id) if id >= 0 && p.burned_subtitle != Some(id) => {
                                     if let Some(requests) = &p.subtitle_requests {
                                         let _ = requests.try_send((id, p.generation));
                                     }
-                                } else if id == -1 {
-                                    p.set_string("sid", "no");
                                 }
+                                Some(-1) => p.set_string("sid", "no"),
+                                None if !crate::prefs::get().auto_subtitles => p.set_string("sid", "no"),
+                                _ => {}
                             }
                             p.report(true);
                         }
@@ -364,13 +362,10 @@ impl Playback {
                     client: r.client.clone(),
                     item: r.media.clone(),
                     version: r.version.clone(),
-                    subtitle_choice: p
-                        .subtitle_choice
-                        .or_else(|| p.subtitles.iter().find(|track| track.selected).map(|track| track.id)),
+                    subtitle_choice: p.preferred_subtitle(),
                     mode,
                     burn_subtitle: p
-                        .subtitle_choice
-                        .or_else(|| p.subtitles.iter().find(|track| track.selected).map(|track| track.id))
+                        .preferred_subtitle()
                         .and_then(|id| p.subtitles.iter().find(|track| track.id == id && track.burn_in).map(|_| id))
                         .or(Some(-1)),
                 })
@@ -463,6 +458,16 @@ impl Playback {
         if let Some(mut remote) = self.remote.take() {
             remote.send(PlaybackState::Stopped, self.resume_at.unwrap_or(self.position), self.duration);
         }
+    }
+    /// The track picked in the player, else the server's default when automatic
+    /// subtitles are on.
+    fn preferred_subtitle(&self) -> Option<i64> {
+        self.subtitle_choice.or_else(|| {
+            crate::prefs::get()
+                .auto_subtitles
+                .then(|| self.subtitles.iter().find(|track| track.selected).map(|track| track.id))
+                .flatten()
+        })
     }
     pub fn subtitle_options(&self) -> Vec<(i64, String, String, bool)> {
         self.subtitles

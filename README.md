@@ -53,7 +53,8 @@ This installs mpv, FFmpeg and libsecret if they're missing, builds with Cargo, a
   Direct Play, then conversion, then other copies of the same edition).
 - Resume a few seconds before where you stopped; progress goes back to the server.
 - Audio and subtitle tracks (Jellyfin text subtitles, or burned-in bitmap subtitles),
-  speed, chapters and full screen.
+  speed, chapters and full screen. Videos start without subtitles unless Settings → Viewing
+  → Show subtitles automatically is on.
 - When an episode ends, the next one plays after a 10-second countdown that can be skipped
   or stopped (Settings → Theater window → Play the next episode).
 - If a stream drops partway, it's reopened where it stopped.

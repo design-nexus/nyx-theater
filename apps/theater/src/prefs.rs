@@ -32,6 +32,8 @@ pub struct Prefs {
     /// Play the next episode after a countdown when one ends.
     pub autoplay_next: bool,
     pub up_next_seconds: u32,
+    /// Turn on the subtitle track the video or server marks as default.
+    pub auto_subtitles: bool,
 }
 impl Default for Prefs {
     fn default() -> Self {
@@ -63,6 +65,7 @@ impl Default for Prefs {
             reconciliation: Default::default(),
             autoplay_next: true,
             up_next_seconds: 10,
+            auto_subtitles: false,
         }
     }
 }
@@ -92,6 +95,7 @@ mod tests {
     fn older_preferences_get_medium_posters_and_choices_round_trip() {
         let old: Prefs = serde_json::from_str("{}").unwrap();
         assert_eq!(old.poster_size, "medium");
+        assert!(!old.auto_subtitles);
         for size in ["small", "medium", "large"] {
             let p = Prefs { poster_size: size.into(), ..Default::default() };
             let saved = serde_json::to_string(&p).unwrap();

@@ -197,6 +197,13 @@ fn build(page: &Page) {
     );
     g.add(&row);
     let (row, _) = widgets::switch_row(
+        "Show subtitles automatically",
+        "Turn on the subtitle track the video or server marks as default. When off, videos start without subtitles; you can still pick a track from the player.",
+        p.auto_subtitles,
+        |on| prefs::update(|p| p.auto_subtitles = on),
+    );
+    g.add(&row);
+    let (row, _) = widgets::switch_row(
         "Play the next episode",
         "When an episode ends, play the next one after a 10-second countdown you can skip or stop.",
         p.autoplay_next,

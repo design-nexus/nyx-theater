@@ -40,6 +40,12 @@ thread_local! {
     static RENDERED: RefCell<Option<Rendered>> = const { RefCell::new(None) };
     static CURRENT: RefCell<Option<MediaItem>> = const { RefCell::new(None) };
     static HISTORY: RefCell<Vec<MediaItem>> = const { RefCell::new(Vec::new()) };
+    static TOOLBAR_REFRESH: RefCell<Vec<gtk::Widget>> = const { RefCell::new(Vec::new()) };
+}
+/// A narrow window drops the grid pages' Refresh (the header has one), so their
+/// controls fit a tiled half.
+pub fn set_narrow(narrow: bool) {
+    TOOLBAR_REFRESH.with(|r| r.borrow().iter().for_each(|w| w.set_visible(!narrow)));
 }
 pub(crate) fn poster_card(item: &MediaItem, parent_count: bool) -> (Artwork, PosterCard) {
     let width = crate::presentation::width();
@@ -304,7 +310,9 @@ pub fn build(stack: &gtk::Stack) {
         let spacer = widgets::hbox(0);
         spacer.set_hexpand(true);
         toolbar.append(&spacer);
-        toolbar.append(&nyx_ui::chrome::status_action("view-refresh-symbolic", "Refresh libraries", servers::refresh));
+        let refresh = nyx_ui::chrome::status_action("view-refresh-symbolic", "Refresh libraries", servers::refresh);
+        toolbar.append(&refresh);
+        TOOLBAR_REFRESH.with(|r| r.borrow_mut().push(refresh.upcast()));
         page.append(&toolbar);
         page.append(&chips);
         let (view, store) = grid(id);
@@ -993,11 +1001,7 @@ fn detail(mut item: MediaItem, children: Vec<MediaItem>) {
     while let Some(child) = body.first_child() {
         body.remove(&child);
     }
-    let back_button = widgets::labeled_button("go-previous-symbolic", "Back");
-    back_button.set_halign(gtk::Align::Start);
-    back_button.set_tooltip_text(Some("Back (Alt+Left)"));
-    back_button.connect_clicked(|_| back());
-    body.append(&back_button);
+    // Back is in the header, so the backdrop starts at the top of the page.
     let hero = hero(&item, false);
     attach_item_menu(&hero, &item, false);
     body.append(&hero);
@@ -1660,10 +1664,6 @@ pub fn begin_person() -> Option<(gtk::Box, u64)> {
     }
     let body = UI.with(|u| u.borrow().as_ref().map(|u| u.details.body.clone()))?;
     clear(&body);
-    let back = widgets::labeled_button("go-previous-symbolic", "Back");
-    back.set_halign(gtk::Align::Start);
-    back.connect_clicked(|_| crate::library::back());
-    body.append(&back);
     window::navigate("details");
     Some((body, detail_generation()))
 }

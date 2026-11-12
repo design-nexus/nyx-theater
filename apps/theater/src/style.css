@@ -210,3 +210,17 @@
 .player-stage:focus-visible {
   outline: none;
 }
+
+/* A title's details: the backdrop runs to the sheet's edges and takes its corners; what
+   follows keeps its room. */
+.theater-window .app-page.flush .page-details,
+.theater-window .app-page.flush .page-details.narrow { padding: 0 0 36px; }
+.theater-window .app-page.flush .page-details > * { margin-left: 16px; margin-right: 26px; }
+.theater-window .app-page.flush .page-details > :first-child { margin-top: 16px; }
+.theater-window .app-page.flush .page-details > .theater-hero { margin: 0 0 8px; border-radius: 0; }
+
+window.fullscreen .app-page {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+}

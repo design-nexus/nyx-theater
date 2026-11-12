@@ -238,10 +238,6 @@ pub fn build(app: &gtk::Application) {
     content.add_css_class("settings-content");
     content.set_hexpand(true);
     content.append(&stack);
-    let body = widgets::hbox(0);
-    body.set_vexpand(true);
-    body.append(&nav);
-    body.append(&content);
     let readout = widgets::label("No servers connected", "status-readout");
     readout.add_css_class("nav-foot");
     readout.add_css_class("compact-hide");
@@ -268,13 +264,27 @@ pub fn build(app: &gtk::Application) {
     refresh.connect_clicked(|_| crate::servers::refresh());
     bar.append(&refresh);
     bar.append(&chrome::settings_button(settings::open));
-    let frame = widgets::vbox(0);
-    frame.add_css_class("window-frame");
-    frame.append(&header.root);
-    frame.append(&body);
+    let frame = Rc::new(nyx_ui::frame::AppFrame::new(&header.root));
+    frame.set_sidebar(&nav);
+    frame.set_page(&content);
+    // The frame's minimum width doesn't hold the window open: a tiled window gets the
+    // compositor's width even while the wide layout is wider, and goes compact.
+    let fit = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::External)
+        .vscrollbar_policy(gtk::PolicyType::Never)
+        .propagate_natural_width(true)
+        .propagate_natural_height(true)
+        .child(&frame.root)
+        .build();
     let overlay = gtk::Overlay::new();
-    overlay.set_child(Some(&frame));
+    overlay.set_child(Some(&fit));
     window.set_child(Some(&overlay));
+    // A title's backdrop and the playing video reach the sheet's edges; every other page
+    // keeps the room inside it.
+    let f = frame.clone();
+    stack.connect_visible_child_name_notify(move |s| {
+        f.set_flush(matches!(s.visible_child_name().as_deref(), Some("details" | "playing")))
+    });
     let probe = gtk::DrawingArea::new();
     probe.set_can_target(false);
     probe.set_can_focus(false);
@@ -490,7 +500,7 @@ fn show_page(id: &str) {
             u.stack.set_visible_child_name(id);
             u.nav.set_visible(id != "playing" && !u.window.is_fullscreen());
             u.collapse.set_visible(id != "playing");
-            u.back.set_visible(id == "playing");
+            u.back.set_visible(matches!(id, "playing" | "details"));
             if id == "playing"
                 && let Some(stage) = u.stack.visible_child()
             {
@@ -636,6 +646,7 @@ fn apply_width() {
                 u.nav.remove_css_class("compact");
             }
             compact_children(u.nav.upcast_ref(), compact);
+            crate::library::set_narrow(width < 980);
             settings_card::fit(&u.window);
             // Existing page padding narrows with the allocated window size too.
             for page in u.stack.pages().iter::<gtk::StackPage>().flatten() {

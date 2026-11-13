@@ -334,7 +334,7 @@ fn load_group_named(
     let key = format!("group-v1:{name}:{cover:?}:{fingerprint}");
     load_spec(art, &server, vec![key], width, height, Some(Group { id, playlist, cover, members: member_jobs }));
 }
-fn load_keys(art: &Artwork, server: &ServerId, keys: Vec<String>, width: u32, height: u32) {
+pub(crate) fn load_keys(art: &Artwork, server: &ServerId, keys: Vec<String>, width: u32, height: u32) {
     load_spec(art, server, keys, width, height, None);
 }
 fn load_spec(art: &Artwork, server: &ServerId, mut keys: Vec<String>, width: u32, height: u32, group: Option<Group>) {

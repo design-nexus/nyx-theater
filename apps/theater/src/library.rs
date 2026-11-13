@@ -42,13 +42,43 @@ thread_local! {
     static HISTORY: RefCell<Vec<MediaItem>> = const { RefCell::new(Vec::new()) };
     static TOOLBAR_REFRESH: RefCell<Vec<gtk::Widget>> = const { RefCell::new(Vec::new()) };
 }
-/// A narrow window drops the grid pages' Refresh (the header has one), so their
-/// controls fit a tiled half.
+thread_local! {
+    static NARROW: Cell<bool> = const { Cell::new(false) };
+    /// Which of Home's new titles the hero shows.
+    static HERO: Cell<usize> = const { Cell::new(0) };
+}
+/// A narrow window drops the grid pages' Refresh (the sidebar has one), so their
+/// controls fit a tiled half, and Home's hero and a title's page get smaller.
 pub fn set_narrow(narrow: bool) {
     TOOLBAR_REFRESH.with(|r| r.borrow().iter().for_each(|w| w.set_visible(!narrow)));
+    if NARROW.replace(narrow) == narrow {
+        return;
+    }
+    show_hero(HERO.get());
+    if let Some((item, children, _)) = RENDERED.with(|r| r.borrow_mut().take()) {
+        detail(item, children);
+    }
 }
 pub(crate) fn poster_card(item: &MediaItem, parent_count: bool) -> (Artwork, PosterCard) {
-    let width = crate::presentation::width();
+    let (art, card) = card(item, parent_count, crate::presentation::width());
+    crate::presentation::register(&art, &card);
+    (art, card)
+}
+/// A poster in a row, which sizes it with the row rather than to the poster size.
+pub(crate) fn shelf_poster(shelf: &crate::shelf::Shelf, item: &MediaItem, parent_count: bool) -> gtk::Box {
+    let (art, card) = card(item, parent_count, crate::presentation::row_width());
+    artwork::load_poster(&art, item, 420, 630);
+    media::set_progress(
+        &card.strip,
+        item.duration_ms.filter(|d| *d > 0).map_or(0.0, |d| (item.watch.position_ms as f64 / d as f64).clamp(0.0, 1.0)),
+    );
+    let size = crate::presentation::sizer(&art, &card);
+    shelf.track(&card.root, move |w| {
+        size(w);
+    });
+    card.root
+}
+fn card(item: &MediaItem, parent_count: bool, width: i32) -> (Artwork, PosterCard) {
     let art = Artwork::new(width, width * 3 / 2, "video-x-generic-symbolic");
     let card = PosterCard::new(&art.root, width);
     let play = gtk::Button::new();
@@ -96,7 +126,6 @@ pub(crate) fn poster_card(item: &MediaItem, parent_count: bool) -> (Artwork, Pos
         label.set_max_width_chars(1);
         card.root.append(&label);
     }
-    crate::presentation::register(&art, &card);
     (art, card)
 }
 fn grid(key: &str) -> (gtk::Box, gio::ListStore) {
@@ -250,6 +279,7 @@ pub fn build(stack: &gtk::Stack) {
     stack.add_named(&discover.root, Some("discover"));
     let discover_filter = widgets::dropdown(&servers::filters(), &prefs::get().library_filter);
     discover_filter.set_tooltip_text(Some("Filter discovery by provider or library"));
+    discover_filter.set_halign(gtk::Align::Start);
     discover_filter.connect_selected_notify(|dd| {
         if FILTERS_UPDATING.with(|u| u.get()) {
             return;
@@ -396,6 +426,7 @@ pub fn build(stack: &gtk::Stack) {
                 }
                 None => {}
             }
+            count_library();
         }
     });
     let notifications = crate::metadata::start(prefs::metadata_config());
@@ -409,6 +440,23 @@ pub fn build(stack: &gtk::Stack) {
         }
     });
     refresh();
+}
+/// The sidebar's counts, once per catalog the worker publishes.
+fn count_library() {
+    thread_local! { static COUNTED: RefCell<std::sync::Weak<crate::catalog::Snapshot>> = const { RefCell::new(std::sync::Weak::new()) }; }
+    let snapshot = crate::catalog::snapshot();
+    if COUNTED.with(|c| c.borrow().upgrade().is_some_and(|old| std::sync::Arc::ptr_eq(&old, &snapshot))) {
+        return;
+    }
+    COUNTED.with(|c| *c.borrow_mut() = std::sync::Arc::downgrade(&snapshot));
+    let mut counts = window::Counts::default();
+    for group in snapshot.iter() {
+        let kind = |k: MediaKind| group.sources.iter().any(|i| i.kind == k);
+        counts.movies += kind(MediaKind::Movie) as u64;
+        counts.shows += kind(MediaKind::Series) as u64;
+        counts.collections += kind(MediaKind::Collection) as u64;
+    }
+    window::set_counts(counts);
 }
 pub fn search(query: &str, scope: &str) {
     UI.with(|u| {
@@ -510,7 +558,7 @@ fn schedule(changed: bool) {
                         cache_scope: (u.page != "search").then(|| {
                             let p = prefs::get();
                             serde_json::to_string(&(
-                                3,
+                                4,
                                 prefs::browse_state(&u.page),
                                 p.plex.map(|p| p.server),
                                 p.jellyfin.map(|p| p.server),
@@ -650,14 +698,14 @@ fn render_discover(data: crate::catalog::Home) {
             (2, "Rediscover older movies", &data.tv, &old.tv),
         ] {
             if items != previous || parts[index].first_child().is_none() {
-                row(&parts[index], title, items.clone(), None);
+                row(&parts[index], title, items.clone(), Cards::Posters, None);
             }
         }
         for (index, title) in crate::catalog::DISCOVERY_CATEGORIES.iter().enumerate() {
             let items = data.discovery.get(index).cloned().unwrap_or_default();
             let previous = old.discovery.get(index).cloned().unwrap_or_default();
             if items != previous || parts[index + 3].first_child().is_none() {
-                row(&parts[index + 3], title, items, None);
+                row(&parts[index + 3], title, items, Cards::Posters, None);
             }
         }
     }
@@ -689,60 +737,135 @@ fn render_home(data: crate::catalog::Home) {
         // connecting or loading shows at the sidebar's foot.
         for state in servers::connection_states().into_iter().filter(|s| !s.connected && !s.busy) {
             let line = widgets::hbox(8);
+            line.add_css_class("theater-server-problem");
             let text = widgets::label(&state.message, "dim");
             text.set_wrap(true);
             text.set_hexpand(true);
             line.append(&text);
-            {
-                let retry = nyx_ui::widgets::icon_button("view-refresh-symbolic", "Try again");
-                let provider = state.provider;
-                retry.connect_clicked(move |_| match provider {
-                    ProviderKind::Plex => plex::refresh(),
-                    ProviderKind::Jellyfin => crate::jellyfin::refresh(),
-                });
-                line.append(&retry);
-                let login = nyx_ui::widgets::icon_button("network-server-symbolic", "Sign in again");
-                login.connect_clicked(move |_| match provider {
-                    ProviderKind::Plex => plex::connect_dialog(),
-                    ProviderKind::Jellyfin => crate::jellyfin::connect_dialog(),
-                });
-                line.append(&login);
-            }
+            let provider = state.provider;
+            let retry = widgets::labeled_button("view-refresh-symbolic", "Try again");
+            retry.connect_clicked(move |_| match provider {
+                ProviderKind::Plex => plex::refresh(),
+                ProviderKind::Jellyfin => crate::jellyfin::refresh(),
+            });
+            line.append(&retry);
+            let login = widgets::labeled_button("network-server-symbolic", "Sign in again");
+            login.connect_clicked(move |_| match provider {
+                ProviderKind::Plex => plex::connect_dialog(),
+                ProviderKind::Jellyfin => crate::jellyfin::connect_dialog(),
+            });
+            line.append(&login);
             parts[0].append(&line);
         }
     }
     // Empty, it takes no room (the page's spacing would push the hero down).
     parts[0].set_visible(parts[0].first_child().is_some());
-    if data.featured != old.featured || parts[1].first_child().is_none() {
-        clear(&parts[1]);
-        if let Some(item) = &data.featured {
-            parts[1].append(&hero(item, true));
-        } else if servers::any_configured() {
-            parts[1].append(&widgets::label("Your library will appear here as it loads.", "dim"));
+    if data.fresh != old.fresh || parts[1].first_child().is_none() {
+        if data.fresh.first().map(|i| &i.id) != old.fresh.first().map(|i| &i.id) {
+            HERO.set(0);
         }
+        render_hero(&parts[1], &data);
     }
-    for (index, heading, current, previous) in [
-        (2, "Continue watching", &data.continuing, &old.continuing),
-        (3, "Recently added movies", &data.movies, &old.movies),
-        (4, "Recently added TV", &data.tv, &old.tv),
+    for (index, heading, current, previous, cards, more) in [
+        (2, "Continue watching", &data.continuing, &old.continuing, Cards::Stills, None),
+        (3, "Recently added movies", &data.movies, &old.movies, Cards::Posters, Some(("All movies", "movies"))),
+        (4, "Recently added TV", &data.tv, &old.tv, Cards::Posters, Some(("All shows", "tv"))),
     ] {
         if current != previous || (index == 4 && data.tv_new != old.tv_new) || parts[index].first_child().is_none() {
-            row(&parts[index], heading, current.clone(), if index == 4 { Some(data.tv_new.as_slice()) } else { None });
+            let descriptions = if index == 4 { Some(data.tv_new.as_slice()) } else { None };
+            if let Some(shelf) = row(&parts[index], heading, current.clone(), cards, descriptions) {
+                if let Some((label, page)) = more {
+                    shelf.set_more(label, move || window::navigate(page));
+                }
+                if index == 2 {
+                    let n = current.len();
+                    shelf.set_sub(&format!("{n} in progress"));
+                }
+            }
         }
     }
 }
-fn hero(item: &MediaItem, actions: bool) -> gtk::Overlay {
-    let art = Artwork::new(1, 360, "video-display-symbolic");
-    art.root.add_css_class("theater-hero");
-    if actions {
-        art.root.add_css_class("theater-hero-home");
+fn render_hero(part: &gtk::Box, data: &crate::catalog::Home) {
+    clear(part);
+    let index = HERO.get().min(data.fresh.len().saturating_sub(1));
+    if let Some(item) = data.fresh.get(index) {
+        part.append(&hero(item, data.fresh.len(), index));
+    } else if servers::any_configured() && data.continuing.is_empty() && data.movies.is_empty() && data.tv.is_empty() {
+        part.append(&widgets::label("Your library will appear here as it loads.", "dim"));
     }
+    part.set_visible(part.first_child().is_some());
+}
+/// Show the `index`th new title in Home's hero.
+fn show_hero(index: usize) {
+    HERO.set(index);
+    if let Some((part, data)) = UI.with(|u| u.borrow().as_ref().map(|u| (u.home_parts[1].clone(), u.home_data.clone()))) {
+        render_hero(&part, &data);
+    }
+}
+/// "1 h 58 min"; "52 min".
+fn runtime(ms: u64) -> String {
+    let minutes = ms.div_ceil(60_000);
+    match (minutes / 60, minutes % 60) {
+        (0, m) => format!("{m} min"),
+        (h, 0) => format!("{h} h"),
+        (h, m) => format!("{h} h {m} min"),
+    }
+}
+/// The score to show beside a star: IMDb's, else TMDB's, else the first out of ten.
+fn star_rating(item: &MediaItem) -> Option<String> {
+    let ratings = &item.metadata.ratings;
+    ["imdb", "tmdb"]
+        .iter()
+        .find_map(|s| ratings.iter().find(|r| r.source == *s))
+        .or_else(|| ratings.iter().find(|r| r.scale == 1000))
+        .map(|r| format!("{:.1}", r.value as f64 / 100.0))
+}
+/// Where a title is: "on Plex and Jellyfin", "on Plex".
+fn servers_line(item: &MediaItem) -> String {
+    let providers: Vec<_> =
+        logical_sources(item).iter().map(|s| s.id.server.provider).chain([item.id.server.provider]).collect();
+    let names: Vec<_> = [(ProviderKind::Plex, "Plex"), (ProviderKind::Jellyfin, "Jellyfin")]
+        .into_iter()
+        .filter(|(p, _)| providers.contains(p))
+        .map(|(_, name)| name)
+        .collect();
+    format!("on {}", names.join(" and "))
+}
+/// The year, length (or seasons), genre and certification, as one line.
+pub(crate) fn facts_line(item: &MediaItem, genres: usize) -> String {
+    let mut facts = vec![];
+    if item.kind == MediaKind::Episode {
+        if let Some(s) = item.season_number {
+            facts.push(format!("Season {s}"));
+        }
+        if let Some(e) = item.episode_number {
+            facts.push(format!("Episode {e}"));
+        }
+    }
+    facts.extend(item.year.map(|y| y.to_string()));
+    match item.kind {
+        MediaKind::Series => facts.extend(item.metadata.season_count.map(|n| format!("{n} season{}", if n == 1 { "" } else { "s" }))),
+        MediaKind::Movie | MediaKind::Episode => facts.extend(item.duration_ms.filter(|d| *d > 0).map(runtime)),
+        _ => {}
+    }
+    facts.extend(item.metadata.certification.clone());
+    if !item.metadata.genres.is_empty() {
+        facts.push(item.metadata.genres.iter().take(genres).cloned().collect::<Vec<_>>().join(", "));
+    }
+    facts.join(" · ")
+}
+fn hero(item: &MediaItem, count: usize, index: usize) -> gtk::Overlay {
+    let narrow = NARROW.get();
+    let height = if narrow { 230 } else { 290 };
+    let art = Artwork::new(1, height, "video-display-symbolic");
+    art.root.add_css_class("theater-hero");
+    art.root.add_css_class("theater-hero-home");
     art.root.set_hexpand(true);
     art.root.set_halign(gtk::Align::Fill);
     art.picture.set_size_request(-1, -1);
     art.picture.set_hexpand(true);
     art.picture.set_halign(gtk::Align::Fill);
-    art.placeholder.set_size_request(-1, 360);
+    art.placeholder.set_size_request(-1, height);
     artwork::load(&art, &item.id.server, item.backdrop.as_deref().or(item.poster.as_deref()), 1280, 720);
     let shade = widgets::vbox(0);
     shade.add_css_class("theater-hero-shade");
@@ -750,133 +873,236 @@ fn hero(item: &MediaItem, actions: bool) -> gtk::Overlay {
     shade.set_hexpand(true);
     shade.set_vexpand(true);
     art.root.add_overlay(&shade);
-    let content = widgets::vbox(12);
+    let content = widgets::vbox(6);
     content.add_css_class("theater-hero-content");
     content.set_valign(gtk::Align::End);
-    content.set_hexpand(true);
-    let eyebrow = widgets::label(
-        if item.watch.position_ms > 0 { "CONTINUE WATCHING" } else { "FEATURED" },
-        "theater-eyebrow",
-    );
-    content.append(&eyebrow);
+    content.set_halign(gtk::Align::Start);
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+    let added = item.added_at.max(item.metadata.latest_episode_added).unwrap_or(0);
+    let lead = if now - added < 7 * 86400 { "New this week" } else { "Recently added" };
+    content.append(&widgets::label(&format!("{lead} · {}", servers_line(item)).to_uppercase(), "theater-eyebrow"));
     let title = widgets::label(&item.title, "theater-hero-title");
     title.set_wrap(true);
     title.set_lines(2);
     title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    title.set_max_width_chars(1);
+    title.set_max_width_chars(28);
     content.append(&title);
-    let metadata = [
-        item.year.map(|year| year.to_string()),
-        item.duration_ms.map(|d| format!("{} min", d / 60000)),
-        Some(source_label(item)),
-    ]
-    .into_iter()
-    .flatten()
-    .collect::<Vec<_>>()
-    .join(" · ");
-    let metadata = widgets::label(&metadata, "theater-hero-meta");
-    metadata.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    metadata.set_max_width_chars(1);
-    content.append(&metadata);
-    let summary = widgets::label(&item.summary, "theater-hero-summary");
-    summary.set_wrap(true);
-    summary.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    summary.set_lines(if actions { 3 } else { 2 });
-    summary.set_max_width_chars(1);
-    content.append(&summary);
-    if actions {
-        let buttons = widgets::hbox(8);
-        let play = widgets::labeled_button(
-            "media-playback-start-symbolic",
-            if item.resume_ms() > 0 { "Resume" } else { "Play" },
-        );
-        play.add_css_class("suggested-action");
+    let meta = widgets::hbox(4);
+    meta.add_css_class("theater-hero-meta");
+    let facts = facts_line(item, 1);
+    meta.append(&widgets::label(&facts, ""));
+    if let Some(score) = star_rating(item) {
+        if !facts.is_empty() {
+            meta.append(&widgets::label("·", ""));
+        }
+        let star = gtk::Image::from_icon_name("starred-symbolic");
+        star.add_css_class("theater-star");
+        star.set_pixel_size(13);
+        meta.append(&star);
+        meta.append(&widgets::label(&score, ""));
+    }
+    content.append(&meta);
+    if !narrow && !item.summary.is_empty() {
+        let summary = widgets::label(&item.summary, "theater-hero-summary");
+        summary.set_wrap(true);
+        summary.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        summary.set_lines(2);
+        summary.set_max_width_chars(62);
+        content.append(&summary);
+    }
+    let buttons = widgets::hbox(8);
+    buttons.add_css_class("theater-hero-buttons");
+    let play = widgets::labeled_button("media-playback-start-symbolic", if item.resume_ms() > 0 { "Resume" } else { "Play" });
+    play.add_css_class("suggested-action");
+    let current = item.clone();
+    play.connect_clicked(move |_| {
+        if !play_item(&current, false) {
+            show_detail(current.clone());
+        }
+    });
+    buttons.append(&play);
+    let details = widgets::labeled_button("dialog-information-symbolic", "Details");
+    let current = item.clone();
+    details.connect_clicked(move |_| show_detail(current.clone()));
+    buttons.append(&details);
+    if !narrow && matches!(item.kind, MediaKind::Movie | MediaKind::Episode) {
+        let add = widgets::labeled_button("list-add-symbolic", "Add to playlist");
         let current = item.clone();
-        play.connect_clicked(move |_| {
-            if !play_item(&current, false) {
-                show_detail(current.clone());
+        add.connect_clicked(move |_| crate::playlists::add_dialog(current.clone()));
+        buttons.append(&add);
+    }
+    content.append(&buttons);
+    art.root.add_overlay(&content);
+    if count > 1 {
+        let dots = widgets::hbox(6);
+        dots.add_css_class("theater-hero-dots");
+        dots.set_halign(gtk::Align::End);
+        dots.set_valign(gtk::Align::End);
+        for n in 0..count {
+            let dot = gtk::Button::new();
+            dot.add_css_class("hero-dot");
+            if n == index {
+                dot.add_css_class("active");
             }
-        });
-        buttons.append(&play);
-        let details = nyx_ui::widgets::bar_button("help-about-symbolic", "Details");
-        details.add_css_class("hero-icon");
-        let current = item.clone();
-        details.connect_clicked(move |_| show_detail(current.clone()));
-        buttons.append(&details);
-        content.append(&buttons);
+            dot.set_valign(gtk::Align::Center);
+            let name = format!("Show new title {} of {count}", n + 1);
+            dot.set_tooltip_text(Some(&name));
+            dot.update_property(&[gtk::accessible::Property::Label(&name)]);
+            dot.connect_clicked(move |_| show_hero(n));
+            dots.append(&dot);
+        }
+        art.root.add_overlay(&dots);
     }
-    if actions {
-        // On Home the text keeps to the shaded left half; the right half is picture.
-        let halves = widgets::hbox(0);
-        halves.set_homogeneous(true);
-        halves.append(&content);
-        halves.append(&widgets::hbox(0));
-        art.root.add_overlay(&halves);
-    } else {
-        art.root.add_overlay(&content);
-    }
+    attach_item_menu(&art.root, item, true);
     art.root
 }
+/// A wide still for Continue watching: how far you got and the time left.
+fn still_card(item: &MediaItem) -> (gtk::Widget, impl Fn(i32) + 'static) {
+    let art = Artwork::new(240, 135, "video-x-generic-symbolic");
+    art.root.add_css_class("theater-still");
+    let keys = match item.kind {
+        MediaKind::Episode => [item.poster.clone(), item.backdrop.clone()],
+        _ => [item.backdrop.clone(), item.poster.clone()],
+    };
+    artwork::load_keys(&art, &item.id.server, keys.into_iter().flatten().collect(), 640, 360);
+    let shade = widgets::vbox(0);
+    shade.add_css_class("still-shade");
+    shade.set_can_target(false);
+    shade.set_hexpand(true);
+    shade.set_vexpand(true);
+    art.root.add_overlay(&shade);
+    let play = gtk::Button::from_icon_name("media-playback-start-symbolic");
+    play.add_css_class("still-play");
+    play.set_halign(gtk::Align::End);
+    play.set_valign(gtk::Align::Start);
+    play.set_tooltip_text(Some("Resume"));
+    play.update_property(&[gtk::accessible::Property::Label("Resume")]);
+    let selected = item.clone();
+    play.connect_clicked(move |_| {
+        if !play_item(&selected, false) {
+            window::status("No playable video is available.");
+        }
+    });
+    art.root.add_overlay(&play);
+    let text = widgets::vbox(1);
+    text.add_css_class("still-text");
+    text.set_valign(gtk::Align::End);
+    text.set_can_target(false);
+    let (title, _, _) = nyx_media_model::tv::labels(item);
+    let name = widgets::label(&title, "still-title");
+    name.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    name.set_max_width_chars(1);
+    text.append(&name);
+    let left = item.duration_ms.map(|d| d.saturating_sub(item.watch.position_ms)).filter(|l| *l > 0).map(|l| format!("{} left", runtime(l)));
+    let place = match (item.season_number, item.episode_number) {
+        (Some(s), Some(e)) if item.kind == MediaKind::Episode => Some(format!("S{s} · E{e}")),
+        _ => item.year.map(|y| y.to_string()),
+    };
+    let sub = widgets::label(&place.into_iter().chain(left).collect::<Vec<_>>().join(" · "), "still-sub");
+    sub.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    sub.set_max_width_chars(1);
+    text.append(&sub);
+    art.root.add_overlay(&text);
+    let progress = gtk::ProgressBar::new();
+    progress.add_css_class("still-progress");
+    progress.set_valign(gtk::Align::End);
+    progress.set_can_target(false);
+    progress.set_fraction(item.duration_ms.filter(|d| *d > 0).map_or(0.0, |d| (item.watch.position_ms as f64 / d as f64).clamp(0.0, 1.0)));
+    art.root.add_overlay(&progress);
+    let selected = item.clone();
+    let root = art.root.downgrade();
+    let click = gtk::GestureClick::new();
+    click.set_button(gtk::gdk::BUTTON_PRIMARY);
+    click.connect_released(move |_, _, x, y| {
+        let Some(root) = root.upgrade() else { return };
+        let button = root.pick(x, y, gtk::PickFlags::DEFAULT).is_some_and(|w| w.is::<gtk::Button>() || w.ancestor(gtk::Button::static_type()).is_some());
+        if !button {
+            show_detail(selected.clone());
+        }
+    });
+    art.root.add_controller(click);
+    attach_item_menu(&art.root, item, true);
+    let (root, picture, placeholder) = (art.root.downgrade(), art.picture.downgrade(), art.placeholder.downgrade());
+    let size = move |w: i32| {
+        let h = w * 9 / 16;
+        if let (Some(root), Some(picture), Some(placeholder)) = (root.upgrade(), picture.upgrade(), placeholder.upgrade()) {
+            root.set_size_request(w, h);
+            picture.set_size_request(w, h);
+            placeholder.set_size_request(w, h);
+        }
+    };
+    (art.root.upcast(), size)
+}
+#[derive(Clone, Copy, PartialEq)]
+enum Cards {
+    Posters,
+    Stills,
+}
 struct HomeRow {
-    content: gtk::Box,
-    cards: HashMap<nyx_media_model::ItemId, (MediaItem, String, gtk::Box)>,
+    shelf: crate::shelf::Shelf,
+    cards: HashMap<nyx_media_model::ItemId, (MediaItem, String, gtk::Widget)>,
 }
 thread_local! { static ROWS: RefCell<HashMap<String, HomeRow>> = RefCell::new(HashMap::new()); }
-fn row(body: &gtk::Box, heading: &str, items: Vec<MediaItem>, descriptions: Option<&[(nyx_media_model::ItemId, String)]>) {
+/// Fill `body`'s row of cards, keeping the cards that haven't changed.
+fn row(
+    body: &gtk::Box,
+    heading: &str,
+    items: Vec<MediaItem>,
+    style: Cards,
+    descriptions: Option<&[(nyx_media_model::ItemId, String)]>,
+) -> Option<crate::shelf::Shelf> {
     body.set_visible(!items.is_empty());
     ROWS.with(|rows| {
         let mut rows = rows.borrow_mut();
         let row = rows.entry(heading.into()).or_insert_with(|| {
-            let title = widgets::label(heading, "shelf-title");
-            title.set_xalign(0.0);
-            body.append(&title);
-            let content = widgets::hbox(12);
-            let scroll = gtk::ScrolledWindow::builder()
-                .hscrollbar_policy(gtk::PolicyType::External)
-                .vscrollbar_policy(gtk::PolicyType::Never)
-                .child(&content)
-                .build();
-            body.append(&scroll);
-            HomeRow { content, cards: HashMap::new() }
+            let shelf = match style {
+                Cards::Stills => crate::shelf::Shelf::new(heading, 14, || 240),
+                Cards::Posters => crate::shelf::Shelf::new(heading, 14, crate::presentation::row_width),
+            };
+            body.append(&shelf.root);
+            HomeRow { shelf, cards: HashMap::new() }
         });
-        let mut previous = None;
+        let mut previous: Option<gtk::Widget> = None;
         let mut cards = HashMap::new();
         for item in items {
             let description = descriptions.and_then(|d| d.iter().find(|(id, _)| *id == item.id).map(|(_, text)| text.clone())).unwrap_or_default();
             let old = row.cards.remove(&item.id);
-            let card_root = if old.as_ref().is_some_and(|(old, text, _)| old == &item && text == &description) {
+            let card = if old.as_ref().is_some_and(|(old, text, _)| old == &item && text == &description) {
                 old.unwrap().2
             } else {
                 if let Some((_, _, old)) = old {
-                    row.content.remove(&old);
+                    row.shelf.content.remove(&old);
                 }
-                let (art, card) = poster_card(&item, true);
-                card.root.add_css_class("wide-card");
-                if !description.is_empty() {
-                    let caption = widgets::label(&description, "card-meta");
-                    caption.set_wrap(true);
-                    caption.set_max_width_chars(24);
-                    card.root.append(&caption);
-                }
-                artwork::load_poster(&art, &item, 420, 630);
-                media::set_progress(
-                    &card.strip,
-                    item.duration_ms
-                        .filter(|d| *d > 0)
-                        .map_or(0.0, |d| (item.watch.position_ms as f64 / d as f64).clamp(0.0, 1.0)),
-                );
-                row.content.append(&card.root);
-                card.root
+                let card: gtk::Widget = match style {
+                    Cards::Stills => {
+                        let (card, size) = still_card(&item);
+                        row.shelf.track(&card, size);
+                        card
+                    }
+                    Cards::Posters => {
+                        let card = shelf_poster(&row.shelf, &item, true);
+                        if !description.is_empty() {
+                            let caption = widgets::label(&description, "card-meta");
+                            caption.set_ellipsize(gtk::pango::EllipsizeMode::End);
+                            caption.set_max_width_chars(1);
+                            card.append(&caption);
+                        }
+                        card.upcast()
+                    }
+                };
+                row.shelf.content.append(&card);
+                card
             };
-            row.content.reorder_child_after(&card_root, previous.as_ref());
-            previous = Some(card_root.clone());
-            cards.insert(item.id.clone(), (item, description, card_root));
+            row.shelf.content.reorder_child_after(&card, previous.as_ref());
+            previous = Some(card.clone());
+            cards.insert(item.id.clone(), (item, description, card));
         }
         for (_, (_, _, old)) in row.cards.drain() {
-            row.content.remove(&old);
+            row.shelf.content.remove(&old);
         }
         row.cards = cards;
-    });
+        Some(row.shelf.clone())
+    })
 }
 pub fn show_detail(item: MediaItem) {
     if window::page() != "details" {
@@ -1002,13 +1228,80 @@ fn detail(mut item: MediaItem, children: Vec<MediaItem>) {
         body.remove(&child);
     }
     // Back is in the header, so the backdrop starts at the top of the page.
-    let hero = hero(&item, false);
-    attach_item_menu(&hero, &item, false);
-    body.append(&hero);
-    let action_bar = crate::rich_details::intro(&body, &item);
-    let text = widgets::vbox(12);
-    text.add_css_class("theater-detail-info");
-    text.set_hexpand(true);
+    let top = crate::rich_details::top(&item, NARROW.get());
+    attach_item_menu(&top.root, &item, false);
+    body.append(&top.root);
+    detail_actions(&top, &item);
+    crate::rich_details::about(&body, &item);
+    crate::rich_details::television(&body, &item, &children);
+    if !children.is_empty() {
+        let section = widgets::vbox(10);
+        section.add_css_class("theater-content-section");
+        if matches!(item.kind, MediaKind::Series | MediaKind::Season) {
+            section.append(&widgets::label(if item.kind == MediaKind::Series { "Seasons" } else { "Episodes" }, "shelf-title"));
+        }
+        let view_key = match item.kind {
+            MediaKind::Collection => "collection_contents",
+            MediaKind::Series => "show_contents",
+            _ => "season_contents",
+        };
+        let (view, store) = grid(view_key);
+        set(&store, children.into_iter().map(servers::latest_watch).collect());
+        section.append(&view);
+        body.append(&section);
+    }
+    crate::rich_details::people(&body, &item);
+    crate::rich_details::related(&body, &item);
+    crate::rich_details::media(&body, &logical_sources(&item));
+}
+/// The audio a copy carries, by its best track's codec.
+fn audio_name(codecs: &[String]) -> Option<&'static str> {
+    const NAMES: [(&str, &str); 9] = [
+        ("truehd", "Dolby TrueHD"),
+        ("eac3", "Dolby Digital Plus"),
+        ("dts", "DTS"),
+        ("dca", "DTS"),
+        ("ac3", "Dolby Digital"),
+        ("flac", "FLAC"),
+        ("opus", "Opus"),
+        ("aac", "AAC"),
+        ("mp3", "MP3"),
+    ];
+    NAMES.iter().find(|(codec, _)| codecs.iter().any(|c| c.eq_ignore_ascii_case(codec))).map(|(_, name)| *name)
+}
+/// "4K · HDR · Dolby TrueHD" for a copy.
+fn quality(version: &nyx_media_model::MediaVersion) -> String {
+    let resolution = version.height.map(|h| match h {
+        1600.. => "4K",
+        1000.. => "1080p",
+        700.. => "720p",
+        _ => "SD",
+    });
+    let hdr = version.technical.hdr.as_deref().filter(|h| !h.eq_ignore_ascii_case("sdr"));
+    [resolution, hdr, audio_name(&version.technical.audio_codecs), version.edition.as_deref()]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+/// Which copy Play picks, in words: its quality, where it comes from, how it plays.
+fn copy_line(item: &MediaItem, choice: &PlaybackChoice) -> String {
+    let escape = |s: &str| glib::markup_escape_text(s).to_string();
+    let Some((source, version)) = resolve_choice(item, choice) else {
+        return escape("No copy of this edition is online right now");
+    };
+    let version = source.versions.iter().find(|v| v.id == version);
+    let quality = version.map(quality).filter(|q| !q.is_empty()).unwrap_or_else(|| "Original".into());
+    let how = match choice {
+        PlaybackChoice::Automatic(_) => "plays directly",
+        PlaybackChoice::Source(..) => "this copy",
+    };
+    format!("<b>{}</b> from {} · {how}", escape(&quality), escape(&source_label(&source)))
+}
+/// Play, Trailer, Mark watched, Add to playlist and ⋯, and which copy plays.
+fn detail_actions(top: &crate::rich_details::Top, item: &MediaItem) {
+    let actions = &top.actions;
+    let playable = matches!(item.kind, MediaKind::Movie | MediaKind::Episode) && !item.versions.is_empty();
     if matches!(item.kind, MediaKind::Series | MediaKind::Season) {
         let play = widgets::labeled_button("media-playback-start-symbolic", "Play next");
         play.add_css_class("suggested-action");
@@ -1018,125 +1311,195 @@ fn detail(mut item: MediaItem, children: Vec<MediaItem>) {
                 window::status("No playable episode is available.");
             }
         });
-        action_bar.append(&play);
+        actions.append(&play);
     }
-    if matches!(item.kind, MediaKind::Movie | MediaKind::Episode) && !item.versions.is_empty() {
-        let choices = Rc::new(playback_choices(&item));
-        let options: Vec<_> = choices.iter().enumerate().map(|(index, (label, _))| (index.to_string(), label.clone())).collect();
-        let version = Rc::new(Cell::new(0usize));
-        let dd = widgets::dropdown(&options, "0");
-        fit_dropdown(&dd);
-        dd.set_tooltip_text(Some("Playback source and version"));
-        let selected = version.clone();
-        dd.connect_selected_notify(move |dd| selected.set(dd.selected() as usize));
-        let selectors = widgets::vbox(8);
-        selectors.append(&dd);
-        let playback = Rc::new(RefCell::new("auto".to_owned()));
-        let options =
-            widgets::opts(&[("auto", "Automatic playback"), ("direct", "Direct Play"), ("transcode", "Transcode · 1080p")]);
-        let mode = widgets::dropdown(&options, "auto");
-        mode.set_tooltip_text(Some("Playback mode"));
-        let selected = playback.clone();
-        mode.connect_selected_notify(move |dd| {
-            if let Some((id, _)) = options.get(dd.selected() as usize) {
-                *selected.borrow_mut() = id.clone();
-            }
-        });
-        selectors.append(&mode);
-        let progress = choices.first().is_some_and(|(_, choice)| choice_has_progress(&item, choice));
-        let play = widgets::labeled_button("media-playback-start-symbolic", if progress { "Resume" } else { "Play" });
+    let choices = Rc::new(if playable { playback_choices(item) } else { vec![] });
+    let version = Rc::new(Cell::new(0usize));
+    let progress = |v: usize, item: &MediaItem, choices: &[(String, PlaybackChoice)]| {
+        choices.get(v).is_some_and(|(_, choice)| choice_has_progress(item, choice))
+    };
+    if playable {
+        let resume = progress(0, item, &choices);
+        let play = widgets::labeled_button("media-playback-start-symbolic", if resume { "Resume" } else { "Play" });
         play.add_css_class("suggested-action");
-        let (i, v, m, c) = (item.clone(), version.clone(), playback.clone(), choices.clone());
+        let (i, v, c) = (item.clone(), version.clone(), choices.clone());
         play.connect_clicked(move |_| {
             if let Some((_, choice)) = c.get(v.get()) {
-                start_choice(&i, choice, false, m.borrow().as_str());
+                start_choice(&i, choice, false, "auto");
             }
         });
-        action_bar.append(&play);
-        let start = nyx_ui::widgets::icon_button("media-skip-backward-symbolic", "Start over");
-        start.set_visible(progress);
-        let (i, v, m, c) = (item.clone(), version.clone(), playback.clone(), choices.clone());
-        start.connect_clicked(move |_| {
-            if let Some((_, choice)) = c.get(v.get()) {
-                start_choice(&i, choice, true, m.borrow().as_str());
-            }
-        });
-        action_bar.append(&start);
-        let play_label =
-            play.child().and_downcast::<gtk::Box>().and_then(|content| content.last_child()).and_downcast::<gtk::Label>();
-        let weak_label = play_label.map(|label| label.downgrade());
-        let weak_start = start.downgrade();
-        let i = item.clone();
-        dd.connect_selected_notify(move |dd| {
-            let progress = choices.get(dd.selected() as usize).is_some_and(|(_, choice)| choice_has_progress(&i, choice));
-            if let Some(label) = weak_label.as_ref().and_then(|label| label.upgrade()) {
-                label.set_text(if progress { "Resume" } else { "Play" });
-            }
-            if let Some(start) = weak_start.upgrade() {
-                start.set_visible(progress);
-            }
-        });
-        let versions = gtk::Expander::new(Some("Source and playback options"));
-        versions.set_child(Some(&selectors));
-        text.append(&versions);
+        actions.append(&play);
+        let card = widgets::hbox(8);
+        card.add_css_class("theater-copy");
+        card.set_halign(gtk::Align::Start);
+        let icon = gtk::Image::from_icon_name("video-display-symbolic");
+        card.append(&icon);
+        let line = widgets::label("", "theater-copy-text");
+        line.set_hexpand(true);
+        line.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        if let Some((_, choice)) = choices.first() {
+            line.set_markup(&copy_line(item, choice));
+        }
+        card.append(&line);
+        let copies = choices.iter().filter(|(_, c)| matches!(c, PlaybackChoice::Source(..))).count();
+        if choices.len() > 1 && copies > 1 {
+            let pick = gtk::Button::new();
+            pick.add_css_class("theater-copy-pick");
+            let face = widgets::hbox(6);
+            face.append(&gtk::Label::new(Some(&format!("{copies} versions"))));
+            face.append(&gtk::Image::from_icon_name("pan-down-symbolic"));
+            pick.set_child(Some(&face));
+            pick.set_tooltip_text(Some("Choose the copy and edition that plays"));
+            let play_label = play.child().and_downcast::<gtk::Box>().and_then(|b| b.last_child()).and_downcast::<gtk::Label>();
+            let (i, v, c, line) = (item.clone(), version.clone(), choices.clone(), line.downgrade());
+            pick.connect_clicked(move |pick| {
+                let entries = c
+                    .iter()
+                    .enumerate()
+                    .map(|(n, (label, _))| {
+                        let (i, v, c, line, play_label) = (i.clone(), v.clone(), c.clone(), line.clone(), play_label.clone());
+                        nyx_ui::menu::check(label, n == v.get(), move |_| {
+                            v.set(n);
+                            if let (Some(line), Some((_, choice))) = (line.upgrade(), c.get(n)) {
+                                line.set_markup(&copy_line(&i, choice));
+                            }
+                            if let Some(label) = &play_label {
+                                label.set_text(if progress(n, &i, &c) { "Resume" } else { "Play" });
+                            }
+                        })
+                    })
+                    .collect();
+                nyx_ui::menu::popup_below(pick, entries);
+            });
+            card.append(&pick);
+        }
+        top.source.append(&card);
     }
-    if matches!(item.kind, MediaKind::Movie | MediaKind::Episode) {
-        let add = nyx_ui::widgets::icon_button("list-add-symbolic", "Add to a playlist");
-        let selected = item.clone();
-        add.connect_clicked(move |_| crate::playlists::add_dialog(selected.clone()));
-        action_bar.append(&add);
+    let provider_trailers: Vec<_> =
+        item.metadata.provider_trailers.iter().filter(|t| t.versions.iter().any(|v| !v.parts.is_empty())).cloned().collect();
+    let links: Vec<_> = item.metadata.trailers.iter().filter(|u| crate::metadata::safe_link(u)).take(2).cloned().collect();
+    if let Some(trailer) = provider_trailers.first().cloned() {
+        let button = widgets::labeled_button("theater-film-symbolic", "Trailer");
+        button.set_tooltip_text(Some(&trailer.title));
+        button.connect_clicked(move |_| play_trailer(&trailer));
+        actions.append(&button);
+    } else if let Some(url) = links.first().cloned() {
+        let button = widgets::labeled_button("theater-film-symbolic", "Trailer");
+        button.set_tooltip_text(Some("Watch the trailer in your browser"));
+        button.connect_clicked(move |_| open_link(&url));
+        actions.append(&button);
     }
     if matches!(item.kind, MediaKind::Movie | MediaKind::Episode | MediaKind::Season | MediaKind::Series) {
-        action_bar.append(&watched_button(&item));
+        actions.append(&watched_button(item));
+    }
+    if matches!(item.kind, MediaKind::Movie | MediaKind::Episode) {
+        let add = widgets::labeled_button("list-add-symbolic", "Add to playlist");
+        add.add_css_class("ghost");
+        if NARROW.get() {
+            add.set_child(Some(&gtk::Image::from_icon_name("list-add-symbolic")));
+            add.set_tooltip_text(Some("Add to a playlist"));
+        }
+        let selected = item.clone();
+        add.connect_clicked(move |_| crate::playlists::add_dialog(selected.clone()));
+        actions.append(&add);
     }
     if item.kind == MediaKind::Episode
-        && let Some(show) = episode_show(&item)
+        && let Some(show) = episode_show(item)
     {
         let button = widgets::labeled_button("go-up-symbolic", "Go to show");
         button.connect_clicked(move |_| show_detail(show.clone()));
-        action_bar.append(&button);
+        actions.append(&button);
     }
     if item.kind == MediaKind::Series {
-        let sources = logical_sources(&item);
+        let sources = logical_sources(item);
+        let card = widgets::hbox(8);
+        card.add_css_class("theater-copy");
+        card.set_halign(gtk::Align::Start);
+        card.append(&gtk::Image::from_icon_name("network-server-symbolic"));
+        let line = widgets::label(&format!("On {}", source_label(item)), "theater-copy-text");
+        line.set_hexpand(true);
+        line.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        card.append(&line);
         if sources.len() > 1 {
-            let options: Vec<_> =
-                sources.iter().enumerate().map(|(index, source)| (index.to_string(), source_label(source))).collect();
-            let selected = sources.iter().position(|source| source.id == item.id).unwrap_or(0);
-            let dd = widgets::dropdown(&options, &selected.to_string());
-            fit_dropdown(&dd);
-            dd.set_tooltip_text(Some("Library source"));
-            let selected_id = item.id.clone();
-            dd.connect_selected_notify(move |dd| {
-                if let Some(source) = sources.get(dd.selected() as usize)
-                    && source.id != selected_id {
-                        show_detail(source.clone());
-                    }
+            let pick = gtk::Button::new();
+            pick.add_css_class("theater-copy-pick");
+            let face = widgets::hbox(6);
+            face.append(&gtk::Label::new(Some(&format!("{} sources", sources.len()))));
+            face.append(&gtk::Image::from_icon_name("pan-down-symbolic"));
+            pick.set_child(Some(&face));
+            pick.set_tooltip_text(Some("Library source"));
+            let current = item.id.clone();
+            pick.connect_clicked(move |pick| {
+                let entries = sources
+                    .iter()
+                    .map(|source| {
+                        let s = source.clone();
+                        let here = s.id == current;
+                        nyx_ui::menu::check(&source_label(&s), here, move |_| {
+                            if !here {
+                                show_detail(s.clone());
+                            }
+                        })
+                    })
+                    .collect();
+                nyx_ui::menu::popup_below(pick, entries);
             });
-            text.append(&dd);
+            card.append(&pick);
         }
+        top.source.append(&card);
     }
-    if text.first_child().is_some() {
-        text.add_css_class("theater-source-section");
-        body.append(&text);
-    }
-    crate::rich_details::television(&body, &item, &children);
-    if !children.is_empty() {
-        if matches!(item.kind, MediaKind::Series | MediaKind::Season) {
-            body.append(&widgets::label(if item.kind == MediaKind::Series { "SEASONS" } else { "EPISODES" }, "group-title"));
+    let more = nyx_ui::widgets::icon_button("view-more-horizontal-symbolic", "Play from start, copy title, refresh details");
+    let (i, v, c) = (item.clone(), version.clone(), choices.clone());
+    more.connect_clicked(move |more| {
+        let mut entries = vec![];
+        if let Some((_, choice)) = c.get(v.get()) {
+            if choice_has_progress(&i, choice) {
+                let (i, c, v) = (i.clone(), c.clone(), v.clone());
+                entries.push(nyx_ui::menu::item("Play from start", move || {
+                    if let Some((_, choice)) = c.get(v.get()) {
+                        start_choice(&i, choice, true, "auto");
+                    }
+                }));
+            }
+            for (label, mode) in [("Play with Direct Play", "direct"), ("Play transcoded · 1080p", "transcode")] {
+                let (i, c, v) = (i.clone(), c.clone(), v.clone());
+                entries.push(nyx_ui::menu::item(label, move || {
+                    if let Some((_, choice)) = c.get(v.get()) {
+                        start_choice(&i, choice, false, mode);
+                    }
+                }));
+            }
+            entries.push(nyx_ui::menu::separator());
         }
-        let view_key = match item.kind {
-            MediaKind::Collection => "collection_contents",
-            MediaKind::Series => "show_contents",
-            _ => "season_contents",
-        };
-        let (view, store) = grid(view_key);
-        view.set_margin_bottom(32);
-        set(&store, children.into_iter().map(servers::latest_watch).collect());
-        body.append(&view);
-    }
-    crate::rich_details::people(&body, &item);
-    crate::rich_details::related(&body, &item);
-    crate::rich_details::media(&body, &logical_sources(&item));
+        let first_shown = !provider_trailers.is_empty();
+        for trailer in provider_trailers.iter().skip(1) {
+            let t = trailer.clone();
+            entries.push(nyx_ui::menu::item(&format!("Trailer · {}", trailer.title), move || play_trailer(&t)));
+        }
+        for (n, url) in links.iter().enumerate().skip(usize::from(!first_shown)) {
+            let url = url.clone();
+            let label = if n == 0 { "Trailer in your browser".to_string() } else { format!("Trailer {} in your browser", n + 1) };
+            entries.push(nyx_ui::menu::item(&label, move || open_link(&url)));
+        }
+        let title = i.title.clone();
+        let display = more.display();
+        entries.push(nyx_ui::menu::item("Copy title", move || {
+            display.clipboard().set_text(&title);
+            window::status("Copied title");
+        }));
+        let item = i.clone();
+        entries.push(nyx_ui::menu::item("Refresh details", move || show_detail(item.clone())));
+        nyx_ui::menu::popup_below(more, entries);
+    });
+    actions.append(&more);
+    top.source.set_visible(top.source.first_child().is_some());
+}
+fn open_link(url: &str) {
+    gtk::UriLauncher::new(url).launch(window::window().as_ref(), None::<&gio::Cancellable>, |result| {
+        if let Err(e) = result {
+            window::status(&e.to_string());
+        }
+    });
 }
 fn logical_sources(item: &MediaItem) -> Vec<MediaItem> {
     crate::catalog::snapshot().sources(item).into_iter().filter(|i| servers::configured(&i.id.server)).collect()
@@ -1443,7 +1806,7 @@ fn show_item_menu(anchor: &gtk::Widget, x: f64, y: f64, item: MediaItem, show_de
 /// with all its episodes; the server does that).
 fn watched_button(item: &MediaItem) -> gtk::Button {
     let watched = item.watch.watched;
-    let b = nyx_ui::widgets::icon_button(
+    let b = widgets::labeled_button(
         if watched { "edit-undo-symbolic" } else { "object-select-symbolic" },
         if watched { "Mark unwatched" } else { "Mark watched" },
     );
@@ -1635,23 +1998,13 @@ pub fn detail_row(body: &gtk::Box, title: &str, items: Vec<MediaItem>) {
     if items.is_empty() {
         return;
     }
-    let section = widgets::vbox(12);
-    section.add_css_class("theater-content-section");
-    section.append(&widgets::label(&title.to_uppercase(), "group-title"));
-    let content = widgets::hbox(16);
+    let shelf = crate::shelf::Shelf::new(title, 14, crate::presentation::row_width);
+    shelf.root.add_css_class("theater-content-section");
     for item in items.into_iter().take(24) {
-        let (art, card) = poster_card(&item, false);
-        artwork::load_poster(&art, &item, 420, 630);
-        content.append(&card.root);
+        let card = shelf_poster(&shelf, &item, false);
+        shelf.content.append(&card);
     }
-    section.append(
-        &gtk::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk::PolicyType::External)
-            .vscrollbar_policy(gtk::PolicyType::Never)
-            .child(&content)
-            .build(),
-    );
-    body.append(&section);
+    body.append(&shelf.root);
 }
 pub fn detail_generation() -> u64 {
     DETAIL_GENERATION.with(|g| g.get())

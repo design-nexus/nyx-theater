@@ -5,6 +5,10 @@ pub fn install() {
     for (name, svg) in [
         ("theater-filter-symbolic.svg", include_str!("../data/theater-filter-symbolic.svg")),
         ("theater-film-symbolic.svg", include_str!("../data/theater-film-symbolic.svg")),
+        ("theater-compass-symbolic.svg", include_str!("../data/theater-compass-symbolic.svg")),
+        ("theater-layers-symbolic.svg", include_str!("../data/theater-layers-symbolic.svg")),
+        ("theater-server-symbolic.svg", include_str!("../data/theater-server-symbolic.svg")),
+        ("theater-playlist-symbolic.svg", include_str!("../data/theater-playlist-symbolic.svg")),
         ("theater-imdb-symbolic.svg", include_str!("../data/ratings/imdb-symbolic.svg")),
         ("theater-tmdb-symbolic.svg", include_str!("../data/ratings/themoviedatabase-symbolic.svg")),
         ("theater-tomato-symbolic.svg", include_str!("../data/ratings/rottentomatoes-symbolic.svg")),

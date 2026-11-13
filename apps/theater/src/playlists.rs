@@ -37,6 +37,44 @@ pub fn search(query: &str) {
 pub fn show() {
     reload(true);
 }
+/// The saved playlists, for the sidebar, without asking the servers.
+pub fn load_saved() {
+    reload(false);
+}
+/// Ask the servers for their playlists again (the sidebar's Refresh).
+pub fn refresh_servers() {
+    reload(true);
+}
+/// The sidebar's +.
+pub fn new_playlist() {
+    name_dialog(None, None);
+}
+pub fn selected_id() -> Option<String> {
+    UI.with(|ui| ui.borrow().as_ref().and_then(|ui| ui.selected.clone()))
+}
+/// Open a playlist from the sidebar.
+pub fn open_id(id: &str) {
+    let list = UI.with(|ui| ui.borrow().as_ref().and_then(|ui| ui.lists.iter().find(|l| l.id == id).cloned()));
+    if let Some(list) = list {
+        open(list);
+    }
+}
+fn sidebar(lists: &[Playlist]) {
+    window::set_playlists(
+        lists
+            .iter()
+            .map(|list| window::PlaylistRow {
+                id: list.id.clone(),
+                title: list.title.clone(),
+                count: list.count.unwrap_or(list.entries.len() as u64),
+                server: list.origin.as_ref().map(|id| match id.server.provider {
+                    nyx_media_model::ProviderKind::Plex => "Plex",
+                    nyx_media_model::ProviderKind::Jellyfin => "Jellyfin",
+                }),
+            })
+            .collect(),
+    );
+}
 pub fn on_connection_changed() {
     if prefs::get().last_section == "playlists" {
         reload(true);
@@ -80,6 +118,9 @@ fn apply(lists: Vec<Playlist>, generation: u64) {
     });
     if valid {
         render();
+        if let Some(lists) = UI.with(|ui| ui.borrow().as_ref().map(|ui| ui.lists.clone())) {
+            sidebar(&lists);
+        }
     }
 }
 fn clients() -> Vec<servers::Client> {
@@ -180,6 +221,7 @@ pub fn close_selection() {
     });
     if closed.is_some() {
         render();
+        window::playlist_selected();
     }
 }
 /// Forward into the playlist back last closed; false if there's none to reopen.
@@ -208,6 +250,7 @@ fn select(id: Option<String>) {
             ui.selected = id;
         }
     });
+    window::playlist_selected();
 }
 fn render() {
     let state = UI.with(|ui| ui.borrow().as_ref().map(|ui| (ui.body.clone(), ui.lists.clone(), ui.selected.clone(), ui.query.clone())));

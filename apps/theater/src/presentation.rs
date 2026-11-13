@@ -11,7 +11,12 @@ pub fn width() -> i32 {
         _ => 180,
     }
 }
-pub fn register(art: &Artwork, card: &PosterCard) {
+/// What a row of posters aims for: a little under the grid's size, so Home shows more.
+pub fn row_width() -> i32 {
+    width() * 3 / 4
+}
+/// Sets a poster card to `w` wide; false once the card has gone.
+pub fn sizer(art: &Artwork, card: &PosterCard) -> impl Fn(i32) -> bool + 'static {
     let (root, picture, placeholder, title, meta) = (
         art.root.downgrade(),
         art.picture.downgrade(),
@@ -19,13 +24,12 @@ pub fn register(art: &Artwork, card: &PosterCard) {
         card.title.downgrade(),
         card.meta.downgrade(),
     );
-    let resize: Box<dyn Fn() -> bool> = Box::new(move || {
+    move |w| {
         let (Some(root), Some(picture), Some(placeholder), Some(title), Some(meta)) =
             (root.upgrade(), picture.upgrade(), placeholder.upgrade(), title.upgrade(), meta.upgrade())
         else {
             return false;
         };
-        let w = width();
         let h = w * 3 / 2;
         root.set_size_request(w, h);
         picture.set_size_request(w, h);
@@ -33,7 +37,11 @@ pub fn register(art: &Artwork, card: &PosterCard) {
         title.set_size_request(w, -1);
         meta.set_size_request(w, -1);
         true
-    });
+    }
+}
+pub fn register(art: &Artwork, card: &PosterCard) {
+    let size = sizer(art, card);
+    let resize: Box<dyn Fn() -> bool> = Box::new(move || size(width()));
     resize();
     CARDS.with(|cards| {
         let mut cards = cards.borrow_mut();
@@ -45,4 +53,5 @@ pub fn register(art: &Artwork, card: &PosterCard) {
 }
 pub fn resize() {
     CARDS.with(|cards| cards.borrow_mut().retain(|f| f()));
+    crate::shelf::refit_all();
 }

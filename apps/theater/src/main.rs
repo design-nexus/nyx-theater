@@ -25,6 +25,7 @@ mod rating_index;
 mod servers;
 mod sync;
 mod settings;
+mod shelf;
 mod theme;
 mod view_cache;
 mod widgets;

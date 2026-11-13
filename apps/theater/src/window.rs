@@ -9,8 +9,14 @@ struct Ui {
     nav: gtk::Box,
     stack: gtk::Stack,
     search: gtk::SearchEntry,
-    /// The sidebar's foot: what the servers and the app are doing.
+    /// The sidebar's foot: each server, and what the servers and the app are doing.
+    servers: gtk::Box,
+    status_icon: gtk::Image,
     status: gtk::Label,
+    /// The Library group's counts, by page.
+    counts: Vec<(&'static str, gtk::Label)>,
+    /// The Playlists group's rows, refilled as the playlists load.
+    playlists: gtk::Box,
     player: Rc<RefCell<Playback>>,
     /// The header (hidden in full screen) and its subtitle, the page you're on.
     header: gtk::WindowHandle,
@@ -31,7 +37,13 @@ thread_local! {
     static SEARCH_ORIGIN: RefCell<String> = RefCell::new(String::from("home"));
     static SEARCH_CLEARING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static CLOSING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static COUNTS: std::cell::Cell<Counts> = const { std::cell::Cell::new(Counts { movies: 0, shows: 0, collections: 0 }) };
+    /// The last message, until it's been on screen long enough to give way to the summary.
+    static MESSAGE: RefCell<Option<(String, std::time::Instant)>> = const { RefCell::new(None) };
+    static MESSAGE_TIMER: RefCell<Option<glib::SourceId>> = const { RefCell::new(None) };
 }
+/// How long a message stays at the sidebar's foot before the servers' summary returns.
+const MESSAGE_SECS: u64 = 6;
 pub fn is_closing() -> bool {
     CLOSING.with(|c| c.get())
 }
@@ -41,10 +53,280 @@ pub fn window() -> Option<gtk::ApplicationWindow> {
 pub fn overlay() -> Option<gtk::Overlay> {
     UI.with(|u| u.borrow().as_ref().map(|u| u.overlay.clone()))
 }
+/// Say what the app or a server is doing, at the sidebar's foot.
 pub fn status(text: &str) {
+    MESSAGE.with(|m| *m.borrow_mut() = Some((text.to_owned(), std::time::Instant::now())));
+    if let Some(timer) = MESSAGE_TIMER.with(|t| t.borrow_mut().take()) {
+        timer.remove();
+    }
+    let timer = glib::timeout_add_seconds_local_once(MESSAGE_SECS as u32, || {
+        MESSAGE_TIMER.with(|t| t.borrow_mut().take());
+        MESSAGE.with(|m| m.borrow_mut().take());
+        update_servers();
+    });
+    MESSAGE_TIMER.with(|t| *t.borrow_mut() = Some(timer));
+    update_servers();
+}
+
+/// Titles in each part of the library, for the sidebar.
+#[derive(Clone, Copy, Default, PartialEq)]
+pub struct Counts {
+    pub movies: u64,
+    pub shows: u64,
+    pub collections: u64,
+}
+pub fn set_counts(counts: Counts) {
+    if COUNTS.with(|c| c.replace(counts)) == counts {
+        return;
+    }
     UI.with(|u| {
         if let Some(u) = u.borrow().as_ref() {
-            u.status.set_text(text);
+            for (page, label) in &u.counts {
+                let n = match *page {
+                    "movies" => counts.movies,
+                    "tv" => counts.shows,
+                    _ => counts.collections,
+                };
+                label.set_text(&if n > 0 { thousands(n) } else { String::new() });
+                label.set_visible(n > 0 && !u.nav.has_css_class("compact"));
+            }
+        }
+    });
+    update_servers();
+}
+/// "1,204".
+fn thousands(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+/// The servers card: a row per server with its state as a dot, then what's going on.
+pub fn update_servers() {
+    let Some((rows, icon, label, compact)) = UI.with(|u| {
+        u.borrow().as_ref().map(|u| (u.servers.clone(), u.status_icon.clone(), u.status.clone(), u.nav.has_css_class("compact")))
+    }) else {
+        return;
+    };
+    while let Some(child) = rows.first_child() {
+        rows.remove(&child);
+    }
+    let p = prefs::get();
+    let states = crate::servers::connection_states();
+    let configured: Vec<(nyx_media_model::ProviderKind, String)> = p
+        .plex
+        .map(|s| (nyx_media_model::ProviderKind::Plex, s.name))
+        .into_iter()
+        .chain(p.jellyfin.map(|s| (nyx_media_model::ProviderKind::Jellyfin, s.name)))
+        .collect();
+    for provider in [nyx_media_model::ProviderKind::Plex, nyx_media_model::ProviderKind::Jellyfin] {
+        let name = match provider {
+            nyx_media_model::ProviderKind::Plex => "Plex",
+            nyx_media_model::ProviderKind::Jellyfin => "Jellyfin",
+        };
+        let row = gtk::Button::new();
+        row.add_css_class("theater-server");
+        let content = widgets::hbox(8);
+        let icon = gtk::Image::from_icon_name("theater-server-symbolic");
+        icon.add_css_class("server-icon");
+        icon.add_css_class("compact-hide");
+        content.append(&icon);
+        content.append(&{
+            let l = widgets::label(name, "server-name");
+            l.add_css_class("compact-hide");
+            l
+        });
+        let dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        dot.add_css_class("server-dot");
+        dot.set_valign(gtk::Align::Center);
+        if let Some((_, server)) = configured.iter().find(|(p, _)| *p == provider) {
+            let state = states.iter().find(|s| s.provider == provider);
+            let sub = widgets::label(server, "server-sub");
+            sub.add_css_class("compact-hide");
+            sub.set_hexpand(true);
+            sub.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            sub.set_max_width_chars(1);
+            content.append(&sub);
+            dot.add_css_class(match state {
+                Some(s) if s.busy => "busy",
+                Some(s) if s.connected && !s.message.contains("couldn't") => "ok",
+                Some(s) if s.connected => "busy",
+                _ => "off",
+            });
+            content.append(&dot);
+            let message = state.map(|s| s.message.clone()).unwrap_or_default();
+            row.set_tooltip_text(Some(&format!("{server} · {message}")));
+            row.connect_clicked(move |_| match provider {
+                nyx_media_model::ProviderKind::Plex => crate::plex::refresh(),
+                nyx_media_model::ProviderKind::Jellyfin => crate::jellyfin::refresh(),
+            });
+        } else {
+            if compact {
+                continue;
+            }
+            let sub = widgets::label("Connect", "server-sub");
+            sub.add_css_class("compact-hide");
+            sub.set_hexpand(true);
+            content.append(&sub);
+            row.add_css_class("absent");
+            row.set_tooltip_text(Some(&format!("Connect a {name} server")));
+            row.connect_clicked(move |_| match provider {
+                nyx_media_model::ProviderKind::Plex => crate::plex::connect_dialog(),
+                nyx_media_model::ProviderKind::Jellyfin => crate::jellyfin::connect_dialog(),
+            });
+        }
+        if compact {
+            content.set_halign(gtk::Align::Center);
+        }
+        row.set_child(Some(&content));
+        rows.append(&row);
+    }
+    let busy = states.iter().any(|s| s.busy);
+    let trouble = states.iter().find(|s| !s.connected && !s.busy);
+    let message = MESSAGE.with(|m| m.borrow().clone()).map(|(text, _)| text);
+    let titles = COUNTS.with(|c| c.get());
+    let summary = if configured.is_empty() {
+        "No servers connected".to_owned()
+    } else if let Some(state) = trouble {
+        state.message.clone()
+    } else if busy {
+        states.iter().find(|s| s.busy).map(|s| s.message.clone()).unwrap_or_default()
+    } else {
+        format!("Up to date · {} titles", thousands(titles.movies + titles.shows))
+    };
+    let text = message.unwrap_or_else(|| summary.clone());
+    label.set_text(&text);
+    label.set_tooltip_text(Some(&text));
+    for class in ["ok", "warn", "busy"] {
+        icon.remove_css_class(class);
+    }
+    let (name, class) = if configured.is_empty() || trouble.is_some() {
+        ("dialog-warning-symbolic", "warn")
+    } else if busy {
+        ("content-loading-symbolic", "busy")
+    } else {
+        ("object-select-symbolic", "ok")
+    };
+    icon.set_icon_name(Some(name));
+    icon.add_css_class(class);
+    nyx_ui::sidebar::set_compact(&rows, compact);
+    if let Some(foot) = rows.next_sibling() {
+        foot.set_halign(if compact { gtk::Align::Center } else { gtk::Align::Fill });
+    }
+}
+/// One playlist in the sidebar: its id, name, count and where it comes from.
+pub struct PlaylistRow {
+    pub id: String,
+    pub title: String,
+    pub count: u64,
+    pub server: Option<&'static str>,
+}
+/// Refill the Playlists group.
+pub fn set_playlists(lists: Vec<PlaylistRow>) {
+    let Some((rows, compact)) = UI.with(|u| u.borrow().as_ref().map(|u| (u.playlists.clone(), u.nav.has_css_class("compact")))) else {
+        return;
+    };
+    while let Some(child) = rows.first_child() {
+        rows.remove(&child);
+    }
+    if lists.is_empty() {
+        let (button, _) = nav_row("theater-playlist-symbolic", "All playlists", None);
+        button.set_widget_name("playlists");
+        button.connect_clicked(|_| {
+            crate::playlists::close_selection();
+            navigate("playlists");
+        });
+        rows.append(&button);
+    }
+    for list in lists {
+        let (button, content) = nav_row("theater-playlist-symbolic", &list.title, (list.count > 0).then(|| thousands(list.count)));
+        if let Some(server) = list.server {
+            let sub = widgets::label(server, "nav-sub");
+            sub.add_css_class("compact-hide");
+            sub.set_valign(gtk::Align::Center);
+            let label = content.first_child().and_then(|c| c.next_sibling());
+            content.insert_child_after(&sub, label.as_ref());
+        }
+        button.set_widget_name(&format!("playlist:{}", list.id));
+        let id = list.id.clone();
+        button.connect_clicked(move |_| {
+            navigate("playlists");
+            crate::playlists::open_id(&id);
+        });
+        rows.append(&button);
+    }
+    nyx_ui::sidebar::set_compact(&rows, compact);
+    highlight();
+}
+/// A sidebar row: icon, name and a count at its end.
+fn nav_row(icon: &str, title: &str, count: Option<String>) -> (gtk::Button, gtk::Box) {
+    let button = gtk::Button::new();
+    button.add_css_class("nav-item");
+    let content = widgets::hbox(12);
+    let image = gtk::Image::from_icon_name(icon);
+    image.add_css_class("nav-icon");
+    content.append(&image);
+    let label = widgets::label(title, "nav-label");
+    label.add_css_class("compact-hide");
+    label.set_hexpand(true);
+    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    content.append(&label);
+    let readout = widgets::label(count.as_deref().unwrap_or(""), "nav-readout");
+    readout.add_css_class("compact-hide");
+    readout.set_visible(count.is_some());
+    content.append(&readout);
+    button.set_child(Some(&content));
+    button.set_tooltip_text(Some(title));
+    button.update_property(&[gtk::accessible::Property::Label(title)]);
+    (button, content)
+}
+/// A group's heading in its section's colour, and the icon rail's bar in the same colour.
+fn nav_group(list: &gtk::Box, title: &str, section: &str, first: bool, add: Option<(&str, fn())>) {
+    let bar = gtk::Separator::new(gtk::Orientation::Horizontal);
+    bar.add_css_class("nav-divider");
+    bar.add_css_class("compact-show");
+    bar.add_css_class(&format!("section-{section}"));
+    bar.set_visible(false);
+    list.append(&bar);
+    let row = match add {
+        Some((tip, run)) => nyx_ui::sidebar::group_label_with_add(title, first, tip, run),
+        None => nyx_ui::sidebar::group_label(title, first),
+    };
+    nyx_ui::sidebar::set_section(&row, section);
+    list.append(&row);
+}
+pub fn playlist_selected() {
+    highlight();
+}
+/// Mark the sidebar row for the page (and the open playlist) you're on.
+fn highlight() {
+    UI.with(|u| {
+        let u = u.borrow();
+        let Some(u) = u.as_ref() else { return };
+        let page = u.stack.visible_child_name().map(|s| s.to_string()).unwrap_or_default();
+        for (id, _, button) in &u.buttons {
+            if *id == page {
+                button.add_css_class("active");
+            } else {
+                button.remove_css_class("active");
+            }
+        }
+        let open = crate::playlists::selected_id().map(|id| format!("playlist:{id}"));
+        let mut child = u.playlists.first_child();
+        while let Some(row) = child {
+            let name = row.widget_name();
+            let on = page == "playlists" && (open.as_deref() == Some(name.as_str()) || (open.is_none() && name == "playlists"));
+            if on {
+                row.add_css_class("active");
+            } else {
+                row.remove_css_class("active");
+            }
+            child = row.next_sibling();
         }
     });
 }
@@ -163,38 +445,37 @@ pub fn build(app: &gtk::Application) {
     );
     let nav = widgets::vbox(0);
     nav.add_css_class("settings-navigation");
+    nav.add_css_class("sidebar");
     nav.set_hexpand(false);
-    let list = widgets::vbox(0);
+    let list = widgets::vbox(1);
     list.set_hexpand(false);
     let mut buttons = Vec::new();
+    let mut counts = Vec::new();
     for (id, title, icon) in [
         ("home", "Home", "go-home-symbolic"),
-        ("discover", "Discover", "system-search-symbolic"),
-        ("movies", "Movies", "video-x-generic-symbolic"),
-        ("tv", "TV shows", "video-display-symbolic"),
-        ("collections", "Collections", "folder-symbolic"),
-        ("playlists", "Playlists", "view-list-symbolic"),
+        ("discover", "Discover", "theater-compass-symbolic"),
+        ("movies", "Movies", "theater-film-symbolic"),
+        ("tv", "TV shows", "tv-symbolic"),
+        ("collections", "Collections", "theater-layers-symbolic"),
     ] {
-        let button = gtk::Button::new();
-        button.add_css_class("nav-item");
-        button.set_tooltip_text(Some(title));
-        let content = widgets::hbox(12);
-        content.append(&gtk::Image::from_icon_name(icon));
-        let label = widgets::label(title, "nav-label");
-        label.add_css_class("compact-hide");
-        label.set_hexpand(true);
-        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        content.append(&label);
-        button.set_child(Some(&content));
-        button.connect_clicked(move |_| {
-            if id == "playlists" {
-                crate::playlists::close_selection();
-            }
-            navigate(id);
-        });
+        match id {
+            "home" => nav_group(&list, "Watch", nyx_ui::sidebar::ACCENT_SECTION, true, None),
+            "movies" => nav_group(&list, "Library", "swatch-green", false, None),
+            _ => {}
+        }
+        let (button, content) = nav_row(icon, title, None);
+        if id != "home" && id != "discover"
+            && let Some(readout) = content.last_child().and_downcast::<gtk::Label>()
+        {
+            counts.push((id, readout));
+        }
+        button.connect_clicked(move |_| navigate(id));
         list.append(&button);
         buttons.push((id, title, button));
     }
+    nav_group(&list, "Playlists", "swatch-violet", false, Some(("New playlist", crate::playlists::new_playlist)));
+    let playlist_rows = widgets::vbox(1);
+    list.append(&playlist_rows);
     nav.append(
         &gtk::ScrolledWindow::builder()
             .hexpand(false)
@@ -214,10 +495,11 @@ pub fn build(app: &gtk::Application) {
     let playing = crate::now_playing::build(&player);
     stack.add_named(&playing, Some("playing"));
     let search = gtk::SearchEntry::new();
-    search.set_placeholder_text(Some("Search movies and TV shows  (Ctrl+F)"));
+    search.set_placeholder_text(Some("Search movies and shows"));
     search.update_property(&[gtk::accessible::Property::Label("Search the library")]);
     search.add_css_class("bar-search");
-    search.set_width_chars(40);
+    search.set_width_chars(30);
+    search.set_max_width_chars(40);
     // Typing starts from the page you were on, so its search (movies, playlists…) applies.
     let focus = gtk::EventControllerFocus::new();
     focus.connect_enter(|_| set_search_origin());
@@ -238,16 +520,36 @@ pub fn build(app: &gtk::Application) {
     content.add_css_class("settings-content");
     content.set_hexpand(true);
     content.append(&stack);
+    // The sidebar's foot: each server with a dot for its state, then what's going on
+    // and Refresh.
+    let card = widgets::vbox(0);
+    card.add_css_class("theater-servers");
+    let server_rows = widgets::vbox(0);
+    card.append(&server_rows);
+    let foot = widgets::hbox(6);
+    foot.add_css_class("theater-servers-foot");
+    let status_icon = gtk::Image::from_icon_name("object-select-symbolic");
+    status_icon.add_css_class("status-icon");
+    status_icon.add_css_class("compact-hide");
+    foot.append(&status_icon);
     let readout = widgets::label("No servers connected", "status-readout");
-    readout.add_css_class("nav-foot");
     readout.add_css_class("compact-hide");
-    readout.set_xalign(0.0);
+    readout.set_hexpand(true);
     readout.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    nav.append(&readout);
-    // The header: the app and the page, search, and while a video plays in the
-    // background its controls, then opening a file, refreshing and Settings.
+    readout.set_max_width_chars(1);
+    foot.append(&readout);
+    let refresh = nyx_ui::widgets::icon_button("view-refresh-symbolic", "Refresh libraries");
+    refresh.add_css_class("servers-refresh");
+    refresh.connect_clicked(|_| {
+        crate::servers::refresh();
+        crate::playlists::refresh_servers();
+    });
+    foot.append(&refresh);
+    card.append(&foot);
+    nav.append(&card);
+    // The header: the app and the sidebar's toggle, search, and while a video plays in
+    // the background its controls, then opening a file and Settings.
     let header = chrome::app_header(&window, "theater-film-symbolic", "Theater");
-    // The sidebar's toggle sits in the header, after the app and the page.
     let collapse = nyx_ui::widgets::bar_button("sidebar-show-symbolic", "Collapse the sidebar (Ctrl+B)");
     collapse.connect_clicked(|_| toggle_sidebar());
     header.start.append(&collapse);
@@ -255,14 +557,23 @@ pub fn build(app: &gtk::Application) {
     back_button.set_visible(false);
     back_button.connect_clicked(|_| back());
     header.start.append(&back_button);
-    header.center.append(&search);
+    let search_box = gtk::Overlay::new();
+    search_box.set_child(Some(&search));
+    let hint = widgets::label("Ctrl F", "key-hint");
+    hint.set_halign(gtk::Align::End);
+    hint.set_valign(gtk::Align::Center);
+    hint.set_margin_end(10);
+    hint.set_can_target(false);
+    search_box.add_overlay(&hint);
+    search.connect_changed(move |s| hint.set_visible(s.text().is_empty()));
+    header.center.append(&search_box);
     let bar = header.end.clone();
-    let open = nyx_ui::widgets::bar_button("document-open-symbolic", "Open a video file (Ctrl+O)");
+    let open = widgets::labeled_button("folder-symbolic", "Open video");
+    open.add_css_class("header-action");
+    open.set_valign(gtk::Align::Center);
+    open.set_tooltip_text(Some("Open a video file (Ctrl+O)"));
     open.connect_clicked(|_| open_file());
     bar.append(&open);
-    let refresh = nyx_ui::widgets::bar_button("view-refresh-symbolic", "Refresh libraries");
-    refresh.connect_clicked(|_| crate::servers::refresh());
-    bar.append(&refresh);
     bar.append(&chrome::settings_button(settings::open));
     let frame = Rc::new(nyx_ui::frame::AppFrame::new(&header.root));
     frame.set_sidebar(&nav);
@@ -423,7 +734,11 @@ pub fn build(app: &gtk::Application) {
             nav,
             stack,
             search,
+            servers: server_rows,
+            status_icon,
             status: readout,
+            counts,
+            playlists: playlist_rows,
             player,
             header: header.root.clone(),
             subtitle: header.subtitle.clone(),
@@ -432,6 +747,9 @@ pub fn build(app: &gtk::Application) {
             buttons,
         })
     });
+    set_playlists(vec![]);
+    update_servers();
+    crate::playlists::load_saved();
     let p = prefs::get();
     let start = prefs::startup_page(&p).to_owned();
     navigate(&start);
@@ -478,7 +796,7 @@ fn set_search_origin() {
             u.search.set_placeholder_text(Some(match origin.as_str() {
                 "movies" => "Search movies", "tv" => "Search TV shows", "collections" => "Search collections",
                 "playlists" => "Search playlists or playlist videos",
-                _ => "Search movies and TV shows",
+                _ => "Search movies and shows",
             }));
             SEARCH_ORIGIN.with(|stored| *stored.borrow_mut() = origin);
         }
@@ -506,24 +824,18 @@ fn show_page(id: &str) {
             {
                 stage.grab_focus();
             }
-            let mut title = match id {
+            let title = match id {
                 "details" => "Details",
                 "playing" => "Playback",
-                _ => "Search",
+                "playlists" => "Playlists",
+                _ => u.buttons.iter().find(|(page, _, _)| *page == id).map_or("Search", |(_, name, _)| name),
             };
-            for (page, name, button) in &u.buttons {
-                if *page == id {
-                    button.add_css_class("active");
-                    title = name;
-                } else {
-                    button.remove_css_class("active");
-                }
-            }
+            // The sidebar says where you are; the header keeps to the app's name.
             chrome::set_title(&u.window, "Theater", title);
-            u.subtitle.set_text(title);
-            u.subtitle.set_visible(true);
+            u.subtitle.set_visible(false);
         }
     });
+    highlight();
     crate::library::show(id);
 }
 pub fn page() -> String {
@@ -622,30 +934,32 @@ fn toggle_sidebar() {
     prefs::update(|p| p.sidebar_collapsed = !p.sidebar_collapsed);
     apply_width();
 }
-fn compact_children(widget: &gtk::Widget, compact: bool) {
+/// The icon rail's own marks (a group's coloured bar) show only on the rail.
+fn compact_show(widget: &gtk::Widget, compact: bool) {
     let mut child = widget.first_child();
     while let Some(c) = child {
-        if c.has_css_class("compact-hide") {
-            c.set_visible(!compact);
+        if c.has_css_class("compact-show") {
+            c.set_visible(compact);
         }
-        if c.parent().is_some_and(|p| p.has_css_class("nav-item")) {
-            c.set_halign(if compact { gtk::Align::Center } else { gtk::Align::Fill });
-        }
-        compact_children(&c, compact);
+        compact_show(&c, compact);
         child = c.next_sibling();
     }
 }
 fn apply_width() {
+    let changed = UI.with(|u| {
+        let u = u.borrow();
+        let Some(u) = u.as_ref() else { return false };
+        let width = if u.window.width() > 0 { u.window.width() } else { u.window.default_width() };
+        let compact = width < 980 || prefs::get().sidebar_collapsed;
+        compact != u.nav.has_css_class("compact") || !u.nav.has_css_class("sized")
+    });
     UI.with(|u| {
         if let Some(u) = u.borrow().as_ref() {
             let width = if u.window.width() > 0 { u.window.width() } else { u.window.default_width() };
             let compact = width < 980 || prefs::get().sidebar_collapsed;
-            if compact {
-                u.nav.add_css_class("compact");
-            } else {
-                u.nav.remove_css_class("compact");
-            }
-            compact_children(u.nav.upcast_ref(), compact);
+            u.nav.add_css_class("sized");
+            nyx_ui::sidebar::set_compact(&u.nav, compact);
+            compact_show(u.nav.upcast_ref(), compact);
             crate::library::set_narrow(width < 980);
             settings_card::fit(&u.window);
             // Existing page padding narrows with the allocated window size too.
@@ -660,6 +974,9 @@ fn apply_width() {
             }
         }
     });
+    if changed {
+        update_servers();
+    }
 }
 pub fn update_motion() {
     UI.with(|u| {

@@ -28,41 +28,124 @@ fn expand(body: &gtk::Box, title: &str, text: &str) {
 pub fn refresh_current() {
     library::rerender_current();
 }
-pub fn intro(body: &gtk::Box, i: &MediaItem) -> gtk::Box {
-    let overview = widgets::vbox(12);
-    overview.add_css_class("theater-overview");
-    body.append(&overview);
-    let body = &overview;
-    let header = widgets::hbox(16);
-    header.add_css_class("theater-detail-header");
-    let actions = widgets::hbox(6);
-    actions.set_halign(gtk::Align::Start);
-    actions.set_valign(gtk::Align::Center);
-    actions.set_hexpand(true);
-    header.append(&actions);
-    let rating_column = widgets::vbox(6);
-    rating_column.set_halign(gtk::Align::End);
-    rating_column.set_valign(gtk::Align::Center);
-    let ratings = gtk::FlowBox::new();
-    ratings.add_css_class("theater-ratings");
-    ratings.set_selection_mode(gtk::SelectionMode::None);
-    ratings.set_halign(gtk::Align::End);
-    ratings.set_hexpand(false);
-    ratings.set_homogeneous(false);
-    ratings.set_max_children_per_line(8);
-    ratings.set_min_children_per_line(1);
-    ratings.set_column_spacing(12);
-    ratings.set_row_spacing(8);
+/// A title's first screen: its backdrop, with the poster, name, facts, ratings,
+/// actions and the copy that plays over its foot.
+pub struct Top {
+    pub root: gtk::Overlay,
+    pub actions: gtk::Box,
+    /// Holds the card saying which copy plays.
+    pub source: gtk::Box,
+}
+/// How tall the backdrop is, and how far down it the poster starts.
+const BACKDROP: i32 = 300;
+const OVERLAP: i32 = 120;
+pub fn top(i: &MediaItem, narrow: bool) -> Top {
+    let root = gtk::Overlay::new();
+    root.add_css_class("theater-detail-top");
+    let back = Artwork::new(1, BACKDROP, "video-display-symbolic");
+    back.root.add_css_class("theater-backdrop");
+    back.root.set_hexpand(true);
+    back.root.set_halign(gtk::Align::Fill);
+    back.picture.set_size_request(-1, -1);
+    back.picture.set_hexpand(true);
+    back.picture.set_halign(gtk::Align::Fill);
+    back.placeholder.set_size_request(-1, BACKDROP);
+    crate::artwork::load(&back, &i.id.server, i.backdrop.as_deref().or(i.poster.as_deref()), 1280, 720);
+    root.set_child(Some(&back.root));
+    let shade = widgets::vbox(0);
+    shade.add_css_class("theater-backdrop-shade");
+    shade.set_size_request(-1, BACKDROP);
+    shade.set_valign(gtk::Align::Start);
+    shade.set_can_target(false);
+    root.add_overlay(&shade);
+    let head = widgets::hbox(if narrow { 18 } else { 24 });
+    head.add_css_class("theater-detail-head");
+    head.set_margin_top(OVERLAP);
+    head.set_valign(gtk::Align::Start);
+    let width = if narrow { 132 } else { 180 };
+    let poster = Artwork::new(width, width * 3 / 2, "video-x-generic-symbolic");
+    poster.root.add_css_class("theater-detail-poster");
+    poster.root.set_valign(gtk::Align::Start);
+    crate::artwork::load_poster(&poster, i, 420, 630);
+    head.append(&poster.root);
+    let text = widgets::vbox(6);
+    text.set_hexpand(true);
+    text.set_valign(gtk::Align::End);
+    if matches!(i.kind, MediaKind::Episode | MediaKind::Season)
+        && let Some(show) = &i.tv.series_title
+    {
+        text.append(&widgets::label(&show.to_uppercase(), "theater-detail-eyebrow"));
+    }
+    let title = widgets::label(&i.title, "theater-detail-title");
+    title.set_wrap(true);
+    title.set_lines(3);
+    title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    title.set_max_width_chars(1);
+    title.set_hexpand(true);
+    text.append(&title);
+    let facts = library::facts_line(i, 2);
+    if !facts.is_empty() {
+        let meta = widgets::label(&facts, "theater-detail-meta");
+        meta.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        meta.set_max_width_chars(1);
+        text.append(&meta);
+    }
+    text.append(&ratings(i));
+    let actions = widgets::hbox(8);
+    actions.add_css_class("theater-detail-actions");
+    text.append(&actions);
+    let source = widgets::vbox(0);
+    text.append(&source);
+    head.append(&text);
+    root.add_overlay(&head);
+    root.set_measure_overlay(&head, true);
+    Top { root, actions, source }
+}
+fn score(r: &Rating) -> String {
+    if r.scale == 10000 {
+        if r.source.starts_with("rt_") { format!("{}%", r.value / 100) } else { format!("{}", r.value / 100) }
+    } else {
+        format!("{:.1}", r.value as f64 / 100.0)
+    }
+}
+/// The ratings as small badges, then yours, which you can change.
+fn ratings(i: &MediaItem) -> gtk::FlowBox {
+    let flow = gtk::FlowBox::new();
+    flow.add_css_class("theater-ratings");
+    flow.set_selection_mode(gtk::SelectionMode::None);
+    flow.set_halign(gtk::Align::Start);
+    flow.set_homogeneous(false);
+    flow.set_max_children_per_line(10);
+    flow.set_min_children_per_line(1);
+    flow.set_column_spacing(6);
+    flow.set_row_spacing(6);
     for r in &i.metadata.ratings {
-        let content = widgets::hbox(6);
-        content.set_halign(gtk::Align::Start);
-        content.append(&crate::rating_icons::icon(&r.source));
-        let score = if r.scale == 10000 {
-            if r.source.starts_with("rt_") { format!("{}%", r.value / 100) } else { format!("{}", r.value / 100) }
-        } else {
-            format!("{:.1}", r.value as f64 / 100.0)
+        let content = widgets::hbox(5);
+        let bold = |text: &str| widgets::label(text, "rating-score");
+        let name = |text: &str| widgets::label(text, "rating-name");
+        let icon = || {
+            let image = crate::rating_icons::icon(&r.source);
+            image.set_pixel_size(14);
+            image
         };
-        content.append(&widgets::label(&score, "theater-rating-score"));
+        match r.source.as_str() {
+            "imdb" => {
+                content.append(&name("IMDb"));
+                content.append(&bold(&score(r)));
+            }
+            "tmdb" => {
+                content.append(&name("TMDB"));
+                content.append(&bold(&score(r)));
+            }
+            "metacritic" => {
+                content.append(&bold(&score(r)));
+                content.append(&name("Metacritic"));
+            }
+            _ => {
+                content.append(&icon());
+                content.append(&bold(&score(r)));
+            }
+        }
         let badge: gtk::Widget = if let Some(url) = r.url.as_deref().filter(|u| metadata::safe_link(u)) {
             let link = gtk::LinkButton::with_label(url, "");
             link.set_child(Some(&content));
@@ -70,38 +153,103 @@ pub fn intro(body: &gtk::Box, i: &MediaItem) -> gtk::Box {
         } else {
             content.upcast()
         };
-        badge.add_css_class("theater-rating-badge");
-        badge.set_halign(gtk::Align::Start);
-        badge.set_hexpand(false);
+        badge.add_css_class("rating-chip");
+        badge.add_css_class(&format!("rating-{}", r.source.replace('_', "-")));
         badge.set_tooltip_text(Some(&r.label()));
         badge.update_property(&[gtk::accessible::Property::Label(&r.label())]);
-        ratings.insert(&badge, -1);
+        flow.insert(&badge, -1);
     }
-    ratings.set_visible(!i.metadata.ratings.is_empty());
-    rating_column.append(&ratings);
-    let row = widgets::hbox(8);
-    row.set_halign(gtk::Align::End);
-    let star = gtk::Image::from_icon_name("starred-symbolic");
-    star.set_pixel_size(18);
-    star.set_tooltip_text(Some("Your rating"));
-    row.append(&star);
-    let mut options = vec![("".into(), "Unrated".into())];
-    options.extend((1..=20).map(|n| ((n * 50).to_string(), format!("{:.1}/10", n as f64 / 2.0))));
-    let selected = metadata::personal(i).map(|n| n.to_string()).unwrap_or_default();
-    let dd = widgets::dropdown(&options, &selected);
-    dd.set_tooltip_text(Some("Your rating"));
+    flow.insert(&your_rating(i), -1);
+    flow
+}
+/// Your own score out of ten, in halves; a popover of the choices.
+fn your_rating(i: &MediaItem) -> gtk::Button {
+    let button = gtk::Button::new();
+    button.add_css_class("rating-chip");
+    button.add_css_class("rating-you");
+    let content = widgets::hbox(5);
+    let star = gtk::Image::from_icon_name(if metadata::personal(i).is_some() { "starred-symbolic" } else { "non-starred-symbolic" });
+    star.set_pixel_size(13);
+    content.append(&star);
+    content.append(&widgets::label("Your rating", "rating-score"));
+    let value = metadata::personal(i).map(|n| format!("{}", n as f64 / 100.0)).unwrap_or_default();
+    if !value.is_empty() {
+        content.append(&widgets::label(&value, "rating-name"));
+    }
+    button.set_child(Some(&content));
+    button.set_tooltip_text(Some("Your rating, out of 10"));
     let item = i.clone();
-    dd.connect_selected_notify(move |d| {
-        if let Some((key, _)) = options.get(d.selected() as usize) {
-            metadata::set_personal(item.clone(), key.parse().ok());
+    button.connect_clicked(move |button| {
+        let popover = gtk::Popover::new();
+        popover.add_css_class("menu-popover");
+        popover.set_has_arrow(false);
+        popover.set_parent(button);
+        let body = widgets::vbox(8);
+        body.add_css_class("theater-rate");
+        let grid = gtk::Grid::new();
+        grid.set_row_spacing(4);
+        grid.set_column_spacing(4);
+        let current = metadata::personal(&item);
+        for n in 1..=20u32 {
+            let value = n * 50;
+            let pick = gtk::Button::with_label(&format!("{}", value as f64 / 100.0));
+            pick.add_css_class("rate-pick");
+            if current == Some(value) {
+                pick.add_css_class("selected");
+            }
+            let (item, pop) = (item.clone(), popover.downgrade());
+            pick.connect_clicked(move |_| {
+                metadata::set_personal(item.clone(), Some(value));
+                if let Some(p) = pop.upgrade() {
+                    p.popdown();
+                }
+            });
+            grid.attach(&pick, ((n - 1) % 10) as i32, ((n - 1) / 10) as i32, 1, 1);
         }
+        body.append(&grid);
+        let clear = gtk::Button::with_label("Clear my rating");
+        clear.set_halign(gtk::Align::Start);
+        clear.set_sensitive(current.is_some());
+        let (item, pop) = (item.clone(), popover.downgrade());
+        clear.connect_clicked(move |_| {
+            metadata::set_personal(item.clone(), None);
+            if let Some(p) = pop.upgrade() {
+                p.popdown();
+            }
+        });
+        body.append(&clear);
+        popover.set_child(Some(&body));
+        popover.connect_closed(|p| {
+            let p = p.clone();
+            glib::idle_add_local_once(move || {
+                if p.parent().is_some() {
+                    p.unparent();
+                }
+            });
+        });
+        popover.popup();
     });
-    row.append(&dd);
-    rating_column.append(&row);
-    header.append(&rating_column);
-    body.append(&header);
-    prose(body, &i.metadata.tagline, "theater-hero-meta");
-    expand(body, "Synopsis", &i.summary);
+    button
+}
+/// The synopsis and the rest of what's known, with genres and studios to browse by.
+pub fn about(body: &gtk::Box, i: &MediaItem) {
+    let section = widgets::vbox(10);
+    section.add_css_class("theater-about");
+    body.append(&section);
+    let body = &section;
+    if !i.metadata.tagline.is_empty() {
+        let tagline = widgets::label(&i.metadata.tagline, "theater-tagline");
+        tagline.set_wrap(true);
+        tagline.set_max_width_chars(100);
+        body.append(&tagline);
+    }
+    if !i.summary.is_empty() {
+        let synopsis = widgets::label(&i.summary, "theater-synopsis");
+        synopsis.set_wrap(true);
+        synopsis.set_max_width_chars(110);
+        synopsis.set_halign(gtk::Align::Start);
+        body.append(&synopsis);
+    }
     let mut facts = vec![];
     macro_rules! fact {
         ($label:literal,$v:expr) => {
@@ -111,56 +259,42 @@ pub fn intro(body: &gtk::Box, i: &MediaItem) -> gtk::Box {
         };
     }
     fact!("Released", i.metadata.release_date.as_deref());
-    fact!("Certification", i.metadata.certification.as_deref());
     fact!("Original language", i.metadata.original_language.as_deref());
-    if !i.metadata.genres.is_empty() {
-        facts.push(format!("Genres: {}", i.metadata.genres.join(", ")));
-    }
     if !i.metadata.countries.is_empty() {
         facts.push(format!("Country: {}", i.metadata.countries.join(", ")));
     }
     fact!("Awards", i.metadata.awards.as_deref());
     prose(body, &facts.join(" · "), "dim");
-    let links = gtk::FlowBox::new();
+    // One line that scrolls sideways: a flow box would line the chips up in columns.
+    let links = widgets::hbox(6);
     links.add_css_class("theater-detail-tags");
-    links.set_halign(gtk::Align::Start);
-    links.set_column_spacing(8);
-    links.set_row_spacing(8);
-    links.set_selection_mode(gtk::SelectionMode::None);
-    links.set_max_children_per_line(4);
-    links.set_min_children_per_line(1);
     for (name, field) in i.metadata.genres.iter().map(|s| (s, "genres")).chain(i.metadata.studios.iter().map(|s| (s, "studios")))
     {
         let button = gtk::Button::with_label(name);
+        button.add_css_class("chip");
         if let Some(label) = button.child().and_downcast::<gtk::Label>() {
             label.set_max_width_chars(24);
             label.set_ellipsize(gtk::pango::EllipsizeMode::End);
         }
-        button.set_tooltip_text(Some(name));
+        button.set_tooltip_text(Some(&format!("More {}", if field == "genres" { format!("{name} titles") } else { format!("from {name}") })));
         let field = field.to_owned();
         let value = name.clone();
         let tv = i.kind != MediaKind::Movie;
         button.connect_clicked(move |_| filter_library(&field, &value, tv));
-        links.insert(&button, -1);
+        links.append(&button);
     }
-    body.append(&links);
-    for trailer in &i.metadata.provider_trailers {
-        if trailer.versions.iter().any(|v| !v.parts.is_empty()) {
-            let button = widgets::labeled_button("media-playback-start-symbolic", &format!("Trailer · {}", trailer.title));
-            let item = trailer.clone();
-            button.connect_clicked(move |_| library::play_trailer(&item));
-            body.append(&button);
-        }
-    }
-    for (n, url) in i.metadata.trailers.iter().filter(|u| metadata::safe_link(u)).take(2).enumerate() {
-        let b = gtk::LinkButton::with_label(
-            url,
-            &format!("Watch trailer{}", if n == 0 { String::new() } else { format!(" {}", n + 1) }),
+    if links.first_child().is_some() {
+        body.append(
+            &gtk::ScrolledWindow::builder()
+                .hscrollbar_policy(gtk::PolicyType::External)
+                .vscrollbar_policy(gtk::PolicyType::Never)
+                .child(&links)
+                .build(),
         );
-        b.set_halign(gtk::Align::Start);
-        body.append(&b);
     }
-    actions
+    if body.first_child().is_none() {
+        body.set_visible(false);
+    }
 }
 fn filter_library(field: &str, value: &str, tv: bool) {
     let page = if tv { "tv" } else { "movies" };
@@ -216,17 +350,19 @@ fn photo(art: &Artwork, path: &str, item: Option<&MediaItem>) {
                 }
     });
 }
+/// Up to two initials for a face with no photo.
+fn initials(name: &str) -> String {
+    name.split_whitespace().filter_map(|w| w.chars().next()).take(2).flat_map(char::to_uppercase).collect()
+}
+/// Cast and crew as round faces with their parts, in a row with arrows.
 pub fn people(body: &gtk::Box, i: &MediaItem) {
     if i.metadata.credits.is_empty() {
         return;
     }
     let mut seen = std::collections::HashSet::new();
-    let section = widgets::vbox(12);
-    section.add_css_class("theater-content-section");
-    body.append(&section);
-    let body = &section;
-    let content = widgets::hbox(16);
-    body.append(&widgets::label("CAST AND CREW", "group-title"));
+    let shelf = crate::shelf::Shelf::new("Cast and crew", 18, || 92);
+    shelf.root.add_css_class("theater-content-section");
+    shelf.root.add_css_class("theater-cast");
     for credit in i
         .metadata
         .credits
@@ -236,37 +372,50 @@ pub fn people(body: &gtk::Box, i: &MediaItem) {
         .filter(|c| seen.insert((c.name.clone(), c.role.clone())))
         .take(36)
     {
-        let art = Artwork::new(112, 168, "avatar-default-symbolic");
+        let face = Artwork::new(56, 56, "avatar-default-symbolic");
+        face.root.add_css_class("cast-photo");
+        face.root.set_halign(gtk::Align::Center);
+        let hue = credit.name.bytes().map(usize::from).sum::<usize>() % 8;
+        let letters = widgets::label(&initials(&credit.name), &format!("cast-initials-{hue}"));
+        letters.add_css_class("cast-initials");
+        letters.set_xalign(0.5);
+        letters.set_size_request(56, 56);
+        letters.set_can_target(false);
+        // Under the photo, which covers the initials once it loads.
+        face.placeholder.set_icon_name(None);
+        face.root.remove_overlay(&face.picture);
+        face.root.add_overlay(&letters);
+        face.root.add_overlay(&face.picture);
         if let Some(path) = &credit.photo {
-            photo(&art, path, Some(i));
+            photo(&face, path, Some(i));
         }
-        let card = nyx_ui::media::PosterCard::new(&art.root, 112);
-        let mut child = art.root.first_child();
-        while let Some(widget) = child {
-            child = widget.next_sibling();
-            if widget.has_css_class("hover-play") {
-                art.root.remove_overlay(&widget);
-            }
+        let card = widgets::vbox(2);
+        card.append(&face.root);
+        let name = widgets::label(&credit.name, "cast-name");
+        let role = widgets::label(if credit.role.is_empty() { &credit.department } else { &credit.role }, "cast-role");
+        for label in [&name, &role] {
+            label.set_xalign(0.5);
+            label.set_justify(gtk::Justification::Center);
+            label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            label.set_max_width_chars(1);
+            label.set_tooltip_text(Some(&label.text()));
+            card.append(label);
         }
-        card.title.set_text(&credit.name);
-        card.meta.set_text(&credit.role);
-        card.title.set_tooltip_text(Some(&credit.name));
-        card.meta.set_tooltip_text(Some(&credit.role));
         let button = gtk::Button::new();
-        button.add_css_class("poster-card");
-        button.set_child(Some(&card.root));
+        button.add_css_class("cast-card");
+        button.set_child(Some(&card));
+        button.set_tooltip_text(Some(&format!("{} · {}", credit.name, if credit.role.is_empty() { &credit.department } else { &credit.role })));
         let c = credit.clone();
         let origin = i.clone();
         button.connect_clicked(move |_| person(c.clone(), origin.clone()));
-        content.append(&button);
+        let weak = button.downgrade();
+        shelf.append(&button, move |w| {
+            if let Some(b) = weak.upgrade() {
+                b.set_size_request(w, -1);
+            }
+        });
     }
-    body.append(
-        &gtk::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk::PolicyType::External)
-            .vscrollbar_policy(gtk::PolicyType::Never)
-            .child(&content)
-            .build(),
-    );
+    body.append(&shelf.root);
 }
 pub fn television(body: &gtk::Box, i: &MediaItem, children: &[MediaItem]) {
     if !matches!(i.kind, MediaKind::Series | MediaKind::Season) {
@@ -281,7 +430,7 @@ pub fn television(body: &gtk::Box, i: &MediaItem, children: &[MediaItem]) {
         facts.push(s.clone());
     }
     if let Some(n) = i.metadata.season_count {
-        facts.push(format!("{n} seasons"));
+        facts.push(format!("{n} season{}", if n == 1 { "" } else { "s" }));
     }
     if let Some(n) = i.metadata.episode_count.or(i.tv.episode_count) {
         facts.push(format!("{n} episodes"));
@@ -412,7 +561,7 @@ fn related_rows(i: &MediaItem, snapshot: &crate::catalog::Snapshot) -> Vec<(Stri
         recommendations =
             all.iter().filter(|s| s.metadata.genres.iter().any(|g| i.metadata.genres.contains(g))).take(18).cloned().collect();
     }
-    rows.push(("More like this · in your library".into(), recommendations));
+    rows.push(("More like this".into(), recommendations));
     if let Some(name) = i.metadata.collection.as_ref() {
         let mut collection: Vec<_> = all
             .iter()

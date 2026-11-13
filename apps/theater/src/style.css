@@ -1,40 +1,13 @@
-/* Cinematic content; shared Nyx chrome and Media Player controls retain their styles. */
+/* Cinematic content; shared Nyx chrome and Media Player controls retain their styles.
+   The look follows nyx-design/mockups/revamp (Theater, option A: Tidy home). */
 /* Pages start level with the sidebar's first row and sit close beside it. */
-.theater-window .page-home,
+.theater-window .page-home { padding: 8px 10px 24px; }
+.theater-window .page-home.narrow { padding: 8px 8px 20px; }
 .theater-window .page-details { padding: 0 18px 36px 8px; }
-.theater-window .page-home.narrow,
 .theater-window .page-details.narrow { padding: 0 14px 32px 8px; }
-.theater-window .theater-hero {
-  border-radius: 10px;
-  background: @theme_video;
-  margin: 8px 0 20px;
-}
-.theater-window .theater-hero-shade {
-  background: linear-gradient(to bottom, alpha(@theme_video, 0.05), alpha(@theme_video, 0.45) 35%, alpha(@theme_video, 0.98));
-}
-.theater-window .theater-hero-content { padding: 24px; }
-.theater-window .theater-hero-content label { color: @theme_on_video; }
-.theater-window .theater-hero-title { font-size: 2.1em; font-weight: 700; }
-.theater-window .theater-eyebrow { font-size: 0.76em; letter-spacing: 2px; opacity: 0.8; }
-.theater-window .theater-hero-meta { font-size: 0.86em; opacity: 0.86; }
-.theater-window .theater-hero-summary { font-size: 0.9em; opacity: 0.85; }
-.theater-window .theater-hero-content button {
-  color: @theme_on_video;
-  background: alpha(@theme_video, 0.8);
-  border: 1px solid alpha(@theme_on_video, 0.25);
-  padding: 6px 14px;
-}
-.theater-window .theater-hero-content button:hover { background: alpha(@theme_on_video, 0.16); }
-.theater-window .theater-hero-content button.suggested-action { background: @theme_on_video; color: @theme_video; }
-.theater-window .theater-hero-content button.suggested-action label,
-.theater-window .theater-hero-content button.suggested-action image { color: @theme_video; }
-.theater-window .theater-detail-info { padding: 8px 0; }
-.theater-window .page-home > box { margin-bottom: 16px; }
 .dialog-card { padding: 24px; }
 .swatch { min-width: 20px; min-height: 20px; border-radius: 4px; }
-.theater-window .theater-hero-home { min-height: 480px; }
-.theater-window .narrow .theater-hero-home { min-height: 400px; }
-.theater-window .theater-hero-home .theater-hero-title { font-size: 2.6em; }
+.key-hint { color: @theme_text_tertiary; font-size: 0.846em; }
 .theater-window .group-poster {
   border-radius: 10px;
   border: 1px solid @hairline;
@@ -63,41 +36,14 @@
   padding: 8px;
   background: transparent;
   border: none;
-  text-align: left;
 }
 .theater-window .theater-list-details > box > box { min-width: 0; }
-.theater-window box.wide-card { padding: 8px; border-radius: 9px; }
-.theater-window box.wide-card:hover { background: @row_hover; }
 .theater-window .theater-playlist-header { margin: 0 0 16px; }
 .theater-window .theater-playlist-header .card-title { font-size: 1.35em; font-weight: 700; }
-
-/* Detail hierarchy: compact metadata groups, generous section boundaries. */
+.theater-window .theater-item-menu { min-width: 180px; padding: 6px; }
 @define-color theater_secondary mix(@theme_text, @theme_dim_text, 0.25);
-.theater-window .page-details .dim,
-.theater-window .page-details .group-title,
 .theater-window .card-meta,
 .theater-window .group-poster-kind { color: @theater_secondary; }
-.theater-window .page-details .theater-prose { font-size: 0.95em; }
-.theater-window .theater-overview { margin: 0 0 24px; }
-.theater-window .theater-detail-header { margin: 0 0 4px; }
-.theater-window .theater-detail-header > box { min-width: 0; }
-.theater-window .theater-item-menu { min-width: 180px; padding: 6px; }
-.theater-window .theater-source-section { margin: 0 0 28px; }
-.theater-window .theater-content-section { margin: 0 0 32px; }
-.theater-window .theater-content-section > .group-title { margin: 0 0 2px; }
-.theater-window .theater-disclosure { padding: 12px 0; border-top: 1px solid @hairline; }
-.theater-window .theater-disclosure > box { margin-top: 8px; }
-.theater-window .theater-rating-badge { color: @theme_text; }
-.theater-window .theater-rating-score { color: @theme_text; font-size: 1em; font-weight: 700; }
-.theater-window .theater-ratings > flowboxchild { padding: 0; margin: 0; }
-.theater-window .theater-ratings button { padding: 4px 0; border: none; background: transparent; }
-.theater-window .theater-ratings button label { text-decoration: none; }
-.theater-window .theater-ratings button:hover { color: @theme_accent; }
-.theater-window .theater-detail-tags > flowboxchild { padding: 0; }
-.theater-window .page-details .theater-hero-meta { opacity: 1; color: @theater_secondary; }
-.theater-window .page-details .theater-hero-content .theater-hero-meta { color: @theme_on_video; }
-.theater-window .page-details .card-meta { font-size: 0.9em; }
-.theater-window .page-details .theater-prose { color: @theme_text; }
 
 /* Filter card: shared segmented navigation and consistent selection rows. */
 .theater-filter-panel .theater-filter-row { padding: 6px 0; }
@@ -107,45 +53,268 @@
 .theater-filter-panel .theater-filter-footer { border-top: 1px solid @hairline; padding-top: 16px; }
 .theater-filter-popover checkbutton { padding: 4px 2px; }
 
-/* ---------- Nyx 2.0 ---------- */
-/* The sidebar's foot: what the servers and the app are doing, quiet. */
-.settings-navigation .nav-foot {
-  padding: 6px 10px 2px;
-  font-size: 11.5px;
-  color: @theme_text_tertiary;
+/* ---------- Header ---------- */
+window.theater-window .app-header button.header-action {
+  min-height: 30px;
+  padding: 0 10px;
+  margin-right: 4px;
+  border-radius: 7px;
+  background: transparent;
+  box-shadow: none;
+  font-weight: 500;
 }
+window.theater-window .app-header button.header-action:hover { background: @row_hover; }
 
-/* Home's hero: a big backdrop filling most of the first screen (like Music's Now
-   playing), shaded from the left so the text in its left half reads, with Play or
-   Resume in the accent and Details as an icon. */
-.theater-window .theater-hero-home { min-height: 460px; }
-.theater-window .narrow .theater-hero-home { min-height: 360px; }
-.theater-window .theater-hero { border-radius: 14px; margin: 0 0 8px; }
-.theater-window .theater-hero-home .theater-hero-shade {
-  background: linear-gradient(to right, alpha(@theme_video, 0.85), alpha(@theme_video, 0.45) 45%, alpha(@theme_video, 0) 75%),
-              linear-gradient(to top, alpha(@theme_video, 0.6), alpha(@theme_video, 0) 55%);
+/* ---------- Sidebar: Watch, Library and Playlists, the servers at its foot ---------- */
+/* The icon rail's mark where a group starts: a short bar in its colour. */
+.theater-window .settings-navigation separator.nav-divider {
+  margin: 8px 14px 6px;
+  min-height: 2px;
+  border-radius: 1px;
+  background: @theme_divider;
 }
-.theater-window .theater-hero-content { padding: 26px 28px; }
-.theater-window .theater-hero-home .theater-hero-title { font-size: 28px; font-weight: 600; }
-.theater-window .theater-eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 1px; }
+.theater-window .settings-navigation .nav-sub {
+  color: @theme_text_tertiary;
+  font-size: 0.846em;
+}
+.theater-window .theater-servers {
+  margin: 12px 2px 2px;
+  padding: 4px;
+  border-radius: var(--nyx-radius-card);
+  background: @theme_card;
+  box-shadow: inset 0 0 0 1px @hairline;
+}
+.theater-window .theater-servers button.theater-server {
+  min-height: 26px;
+  padding: 0 6px;
+  border: none;
+  border-radius: var(--nyx-radius-small);
+  background: transparent;
+  box-shadow: none;
+}
+.theater-window .theater-servers button.theater-server:hover { background: @row_hover; }
+.theater-window .theater-servers .server-icon { -gtk-icon-size: 14px; color: @theme_dim_text; }
+.theater-window .theater-servers .server-name { font-weight: 500; color: @theme_text; }
+.theater-window .theater-servers .server-sub { color: @theme_text_tertiary; font-size: 0.846em; }
+.theater-window .theater-servers .absent .server-name,
+.theater-window .theater-servers .absent .server-icon { color: @theme_text_tertiary; font-weight: 400; }
+.theater-window .server-dot {
+  min-width: 8px;
+  min-height: 8px;
+  margin-right: 4px;
+  border-radius: 4px;
+  background: @theme_text_tertiary;
+}
+.theater-window .server-dot.ok { background: @theme_success; }
+.theater-window .server-dot.busy { background: @theme_warning; }
+.theater-window .server-dot.off { background: @theme_danger; }
+.theater-window .theater-servers-foot {
+  margin-top: 4px;
+  padding: 2px 0 0 6px;
+  border-top: 1px solid @hairline;
+}
+.theater-window .theater-servers-foot .status-readout { color: @theme_text_tertiary; font-size: 0.846em; }
+.theater-window .theater-servers-foot .status-icon { -gtk-icon-size: 13px; color: @theme_text_tertiary; }
+.theater-window .theater-servers-foot .status-icon.ok { color: @theme_success; }
+.theater-window .theater-servers-foot .status-icon.warn { color: @theme_warning; }
+.theater-window .theater-servers-foot button.servers-refresh { min-width: 26px; min-height: 26px; padding: 0; }
+.theater-window .settings-navigation.compact .theater-servers {
+  margin: 12px 0 0;
+  padding: 0;
+  background: none;
+  box-shadow: none;
+}
+.theater-window .settings-navigation.compact .theater-servers-foot { margin-top: 6px; padding: 0; border-top: none; }
+.theater-window .settings-navigation.compact .server-dot { margin: 0; }
+
+/* ---------- Home ---------- */
+/* The hero: a new title, a third shorter than a first screen, shaded from the left so
+   its text reads, with Play in the accent. */
+.theater-window .theater-hero {
+  border-radius: 12px;
+  background: @theme_video;
+}
+.theater-window .theater-hero-home .theater-hero-shade {
+  background: linear-gradient(to right, alpha(black, 0.75), alpha(black, 0.45) 45%, alpha(black, 0) 75%);
+}
+.theater-window .theater-hero-content { padding: 0 32px 28px; }
+.theater-window .narrow .theater-hero-content { padding: 0 24px 22px; }
+.theater-window .theater-hero-content label { color: white; }
+.theater-window .theater-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: alpha(white, 0.75);
+}
+.theater-window .theater-hero-title { font-size: 30px; font-weight: 700; letter-spacing: -0.02em; }
+.theater-window .narrow .theater-hero-title { font-size: 24px; }
+.theater-window .theater-hero-meta label { color: alpha(white, 0.8); }
+.theater-window .theater-star { color: #f5c84b; }
+.theater-window .theater-hero-summary { color: alpha(white, 0.85); }
+.theater-window .theater-hero-buttons { margin-top: 8px; }
 .theater-window .theater-hero-content button {
-  min-height: 32px;
+  min-height: 34px;
+  padding: 0 16px;
   border: none;
   border-radius: 8px;
-  background: alpha(@theme_on_video, 0.14);
+  background: alpha(white, 0.16);
+  box-shadow: none;
+  color: white;
 }
-.theater-window .theater-hero-content button:hover { background: alpha(@theme_on_video, 0.22); }
-.theater-window .theater-hero-content button.suggested-action { background: @theme_accent; color: @theme_on_accent; }
+.theater-window .theater-hero-content button:hover { background: alpha(white, 0.24); }
+.theater-window .theater-hero-content button label,
+.theater-window .theater-hero-content button image { color: white; }
+.theater-window .theater-hero-content button.suggested-action { background: @theme_accent; }
 .theater-window .theater-hero-content button.suggested-action label,
 .theater-window .theater-hero-content button.suggested-action image { color: @theme_on_accent; }
-.theater-window .theater-hero-content button.hero-icon { min-width: 32px; padding: 0; }
-
-/* A shelf's name: sentence case, 600, like the page heads elsewhere. */
-.theater-window .shelf-title {
-  font-size: 14px;
-  font-weight: 600;
-  margin: 14px 0 2px;
+.theater-window .theater-hero-dots { margin: 0 22px 22px 0; }
+.theater-window button.hero-dot {
+  min-width: 6px;
+  min-height: 6px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: alpha(white, 0.45);
+  box-shadow: none;
 }
+.theater-window button.hero-dot.active { min-width: 18px; background: white; }
+.theater-window .theater-server-problem { margin-bottom: 12px; }
+
+/* A row: its name and count, a link to the page, and arrows. */
+.theater-window .theater-shelf { margin-top: 20px; }
+.theater-window .shelf-title { font-size: 15px; font-weight: 600; }
+.theater-window .shelf-sub { color: @theme_text_tertiary; }
+.theater-window button.shelf-more {
+  min-height: 26px;
+  padding: 0 6px;
+  margin-right: 4px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  color: @theme_accent;
+  font-weight: 500;
+}
+.theater-window button.shelf-more:hover { background: @row_hover; }
+.theater-window button.shelf-arrow,
+.theater-window button.shelf-arrow.flat {
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0;
+  border-radius: 7px;
+  background: @field;
+}
+.theater-window button.shelf-arrow:disabled { opacity: 0.4; }
+
+/* Continue watching: wide stills with how far you got and the time left. */
+.theater-window .theater-still { border-radius: 10px; background: @theme_video; }
+.theater-window .still-shade { background: linear-gradient(to top, alpha(black, 0.78), alpha(black, 0) 62%); }
+.theater-window button.still-play {
+  min-width: 30px;
+  min-height: 30px;
+  margin: 10px;
+  padding: 0;
+  border: none;
+  border-radius: 15px;
+  background: alpha(black, 0.5);
+  box-shadow: none;
+  color: white;
+}
+.theater-window button.still-play:hover { background: @theme_accent; color: @theme_on_accent; }
+.theater-window .still-text { margin: 0 12px 16px; }
+.theater-window .still-title { color: white; font-weight: 600; }
+.theater-window .still-sub { color: alpha(white, 0.78); font-size: 0.846em; }
+.theater-window progressbar.still-progress { margin: 0 10px 7px; }
+.theater-window progressbar.still-progress > trough { min-height: 4px; border-radius: 2px; background: alpha(white, 0.3); }
+.theater-window progressbar.still-progress > trough > progress { min-height: 4px; border-radius: 2px; background: @theme_accent; }
+
+/* ---------- A title's page ---------- */
+/* The backdrop runs to the sheet's edges and fades into the page; the poster, name,
+   ratings, actions and the copy that plays sit over its foot. */
+.theater-window .app-page.flush .page-details,
+.theater-window .app-page.flush .page-details.narrow { padding: 0 0 36px; }
+.theater-window .app-page.flush .page-details > * { margin-left: 28px; margin-right: 28px; }
+.theater-window .app-page.flush .page-details.narrow > * { margin-left: 20px; margin-right: 20px; }
+.theater-window .app-page.flush .page-details > .theater-detail-top { margin: 0; }
+.theater-window .app-page.flush .page-details > :first-child:not(.theater-detail-top) { margin-top: 16px; }
+.theater-window .theater-backdrop { border-radius: 0; background: @theme_video; box-shadow: none; }
+.theater-window .theater-backdrop-shade { background: linear-gradient(to bottom, alpha(@theme_bg, 0.2), @theme_bg 96%); }
+.theater-window .theater-detail-head { margin: 0 28px; }
+.theater-window .narrow .theater-detail-head { margin: 0 20px; }
+.theater-window .theater-detail-poster { border-radius: 8px; box-shadow: 0 8px 28px alpha(black, 0.4); }
+.theater-window .theater-detail-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; color: @theme_dim_text; }
+.theater-window .theater-detail-title { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; }
+.theater-window .narrow .theater-detail-title { font-size: 24px; }
+.theater-window .theater-detail-meta { color: @theme_dim_text; }
+.theater-window .theater-ratings { margin-top: 2px; }
+.theater-window .theater-ratings > flowboxchild { padding: 0; margin: 0; }
+.theater-window .rating-chip {
+  min-height: 24px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 6px;
+  background: @field;
+  box-shadow: inset 0 0 0 1px @hairline;
+  color: @theme_dim_text;
+  font-size: 0.846em;
+}
+.theater-window button.rating-chip:hover { background: @row_hover; }
+.theater-window .rating-chip label { text-decoration: none; }
+.theater-window .rating-chip .rating-score { color: @theme_text; font-weight: 700; }
+.theater-window .rating-chip .rating-name { font-weight: 600; }
+.theater-window .rating-chip.rating-imdb { background: alpha(#f5c518, 0.22); box-shadow: none; }
+.theater-window .rating-chip.rating-rt-critic image { color: @theme_danger; }
+.theater-window .rating-chip.rating-you image { color: @theme_warning; }
+.theater-window .theater-rate { padding: 8px; }
+.theater-window button.rate-pick { min-width: 36px; min-height: 28px; padding: 0 4px; }
+.theater-window button.rate-pick.selected { background: @nav_active; color: @theme_accent; }
+.theater-window .theater-detail-actions { margin-top: 10px; }
+.theater-window .theater-detail-actions button { min-height: 32px; padding: 0 12px; }
+.theater-window .theater-detail-actions button.ghost { background: transparent; box-shadow: none; }
+.theater-window .theater-detail-actions button.ghost:hover { background: @row_hover; }
+.theater-window .theater-copy {
+  margin-top: 8px;
+  padding: 6px 6px 6px 12px;
+  border-radius: var(--nyx-radius-card);
+  background: @theme_card;
+  box-shadow: inset 0 0 0 1px @hairline;
+  color: @theme_dim_text;
+}
+.theater-window .theater-copy > image { -gtk-icon-size: 15px; }
+.theater-window button.theater-copy-pick { min-height: 28px; padding: 0 10px; border-radius: 7px; background: @field; }
+.theater-window .theater-about { margin-top: 18px; }
+.theater-window .theater-tagline { font-style: italic; color: @theme_dim_text; }
+.theater-window .theater-synopsis { color: @theme_dim_text; }
+.theater-window .page-details .dim { color: @theater_secondary; }
+.theater-window .page-details .theater-prose { font-size: 0.95em; }
+.theater-window .theater-content-section { margin-top: 20px; }
+.theater-window .theater-content-section > .group-title { margin: 0 0 2px; }
+.theater-window .theater-disclosure { margin-top: 24px; padding: 12px 0; border-top: 1px solid @hairline; }
+.theater-window .theater-disclosure > box { margin-top: 8px; }
+.theater-window .page-details .theater-hero-title { font-size: 28px; font-weight: 700; }
+.theater-window .page-details .card-meta { font-size: 0.9em; }
+
+/* Cast and crew: round faces, initials until a photo loads. */
+.theater-window button.cast-card {
+  padding: 4px 0 6px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: none;
+}
+.theater-window button.cast-card:hover { background: @row_hover; }
+.theater-window .cast-photo { border-radius: 999px; margin-bottom: 6px; box-shadow: none; }
+.theater-window .cast-initials { color: white; font-size: 17px; font-weight: 600; }
+.theater-window .cast-initials-0 { background: #3cc4c9; }
+.theater-window .cast-initials-1 { background: #f5875a; }
+.theater-window .cast-initials-2 { background: #3d8ae8; }
+.theater-window .cast-initials-3 { background: #a0a3b8; }
+.theater-window .cast-initials-4 { background: #8b6cf0; }
+.theater-window .cast-initials-5 { background: #59d45b; }
+.theater-window .cast-initials-6 { background: #c95fc6; }
+.theater-window .cast-initials-7 { background: #eeb43f; }
+.theater-window button.cast-card .cast-name { font-weight: 500; font-size: 0.923em; }
+.theater-window button.cast-card .cast-role { color: @theme_text_tertiary; font-size: 0.846em; font-weight: 400; }
 
 /* A grid page's controls sit on the page, not on a band (the GTK theme gives
    .toolbar a fill of its own). */
@@ -155,7 +324,6 @@
   box-shadow: none;
   padding: 6px 14px;
 }
-
 
 /* The mini-player: the live picture in a raised card over the pages' corner. */
 .theater-window .theater-mini {
@@ -210,14 +378,6 @@
 .player-stage:focus-visible {
   outline: none;
 }
-
-/* A title's details: the backdrop runs to the sheet's edges and takes its corners; what
-   follows keeps its room. */
-.theater-window .app-page.flush .page-details,
-.theater-window .app-page.flush .page-details.narrow { padding: 0 0 36px; }
-.theater-window .app-page.flush .page-details > * { margin-left: 16px; margin-right: 26px; }
-.theater-window .app-page.flush .page-details > :first-child { margin-top: 16px; }
-.theater-window .app-page.flush .page-details > .theater-hero { margin: 0 0 8px; border-radius: 0; }
 
 window.fullscreen .app-page {
   margin: 0;

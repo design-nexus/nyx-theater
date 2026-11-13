@@ -11,6 +11,9 @@ use std::{
 #[derive(Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Home {
     pub featured: Option<MediaItem>,
+    /// Home's hero: the newest titles you haven't started, `featured` first.
+    #[serde(default)]
+    pub fresh: Vec<MediaItem>,
     pub continuing: Vec<MediaItem>,
     pub movies: Vec<MediaItem>,
     pub tv: Vec<MediaItem>,
@@ -86,6 +89,23 @@ fn discovery(items: &[MediaItem], year: i64, seed: u64) -> Vec<Vec<MediaItem>> {
 }
 fn continuing(item: &MediaItem) -> bool {
     item.resume_ms() > 0 && matches!(item.kind, MediaKind::Movie | MediaKind::Episode)
+}
+/// Up to four of the newest movies and shows, leaving out what Continue watching
+/// already shows, those with a backdrop first.
+fn fresh(home: &Home) -> Vec<MediaItem> {
+    let started: std::collections::HashSet<_> =
+        home.continuing.iter().flat_map(|i| [Some(i.id.clone()), i.series.clone()]).flatten().collect();
+    let mut fresh: Vec<_> = home
+        .movies
+        .iter()
+        .chain(&home.tv)
+        .filter(|i| !started.contains(&i.id) && !i.watch.watched)
+        .cloned()
+        .collect();
+    fresh.sort_by_key(|i| std::cmp::Reverse(i.added_at.max(i.metadata.latest_episode_added)));
+    fresh.sort_by_key(|i| i.backdrop.is_none());
+    fresh.truncate(4);
+    fresh
 }
 pub struct Request {
     pub generation: u64,
@@ -411,11 +431,13 @@ impl Index {
                 home.tv.sort_by_key(daily);
                 home.tv.truncate(18);
             }
-            home.featured = if request.page == "discover" {
-                None
-            } else {
-                home.continuing.first().or(home.movies.first()).or(home.tv.first()).cloned()
-            };
+            if request.page == "home" {
+                home.fresh = fresh(&home);
+                let shown: std::collections::HashSet<_> = home.fresh.iter().map(|i| i.id.clone()).collect();
+                home.movies.retain(|i| !shown.contains(&i.id));
+                home.tv.retain(|i| !shown.contains(&i.id));
+            }
+            home.featured = home.fresh.first().cloned();
             view.home = Some(home);
         } else {
             let kind = match request.page.as_str() {
@@ -545,7 +567,10 @@ mod tests {
             let mut index = Index::default();
             let home = index.prepare(input);
             assert!(home.items.is_empty());
-            assert_eq!(home.home.unwrap().movies.len(), 18);
+            let home = home.home.unwrap();
+            assert_eq!(home.fresh.len(), 4);
+            assert_eq!(home.featured.as_ref(), home.fresh.first());
+            assert_eq!(home.movies.len(), 18 - 4, "the hero's titles aren't repeated in the row");
             let mut query = request(2);
             query.page = "search".into();
             query.query = "absent".into();

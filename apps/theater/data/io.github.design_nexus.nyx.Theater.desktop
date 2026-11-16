@@ -6,5 +6,4 @@ Exec=nyx-theater %U
 Icon=io.github.design_nexus.nyx.Theater
 Terminal=false
 Categories=AudioVideo;Video;Player;
-MimeType=video/mp4;video/x-matroska;video/webm;video/quicktime;video/x-msvideo;video/mpeg;video/ogg;video/x-m4v;
 StartupWMClass=io.github.design_nexus.nyx.Theater

@@ -9,6 +9,7 @@ mod inhibit;
 mod jellyfin;
 mod library;
 mod metadata;
+mod mpris;
 mod mini_player;
 mod now_playing;
 mod navigation;
@@ -67,7 +68,11 @@ fn main() -> glib::ExitCode {
         .flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE)
         .build();
     // Nyx Assistant finds and plays titles through this (primary instance only).
-    app.connect_startup(|app| nyx_core::control::serve(app, control::tools(), control::handle));
+    app.connect_startup(|app| {
+        nyx_core::control::serve(app, control::tools(), control::handle);
+        // Media keys, playerctl, the bar, Control Center and the dock.
+        mpris::start(app);
+    });
     app.connect_command_line(|app, cl| {
         let argv: Vec<String> = cl.arguments().iter().skip(1).map(|a| a.to_string_lossy().into_owned()).collect();
         if argv.iter().any(|a| a == "--toggle")

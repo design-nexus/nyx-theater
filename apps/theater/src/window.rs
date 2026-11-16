@@ -1081,6 +1081,11 @@ pub fn now_playing() -> Option<(String, f64, f64, bool)> {
     })
 }
 
+/// The window's player, while the window is open (MPRIS).
+pub fn player() -> Option<Rc<RefCell<Playback>>> {
+    UI.with(|u| u.borrow().as_ref().map(|u| u.player.clone()))
+}
+
 /// Work the player from outside the window (Nyx Assistant).
 pub fn control(action: &str, seconds: f64) -> Result<(), String> {
     let player = UI.with(|u| u.borrow().as_ref().map(|u| u.player.clone())).ok_or("Theater isn't open")?;

@@ -19,6 +19,7 @@ nyx-plex = { path = "../../crates/nyx-plex" }
 sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
 async-channel = "2"
+zbus = "5"
 nyx-jellyfin = { path = "../../crates/nyx-jellyfin" }
 
 rusqlite = { version = "0.40", features = ["bundled"] }

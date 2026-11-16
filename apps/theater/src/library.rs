@@ -722,16 +722,26 @@ fn render_home(data: crate::catalog::Home) {
     };
     clear(&parts[0]);
     if !servers::any_configured() {
-        parts[0].append(&widgets::empty_state(
+        let state = widgets::empty_state(
             "network-server-symbolic",
             "Your movies and shows, together.",
             "Connect Plex or Jellyfin to browse and play your library.",
-            Some(("Connect Plex", Box::new(plex::connect_dialog))),
-        ));
-        let connect = gtk::Button::with_label("Connect Jellyfin");
-        connect.set_halign(gtk::Align::Center);
-        connect.connect_clicked(|_| crate::jellyfin::connect_dialog());
-        parts[0].append(&connect);
+            None,
+        );
+        // The two choices side by side under the message.
+        let choices = widgets::hbox(8);
+        choices.set_halign(gtk::Align::Center);
+        choices.set_margin_top(8);
+        let plex = gtk::Button::with_label("Connect Plex");
+        plex.add_css_class("suggested-action");
+        plex.connect_clicked(|_| plex::connect_dialog());
+        let jellyfin = gtk::Button::with_label("Connect Jellyfin");
+        jellyfin.add_css_class("suggested-action");
+        jellyfin.connect_clicked(|_| crate::jellyfin::connect_dialog());
+        choices.append(&plex);
+        choices.append(&jellyfin);
+        state.append(&choices);
+        parts[0].append(&state);
     } else {
         // Only a server that needs you (offline, signed out) gets a line here; what's
         // connecting or loading shows at the sidebar's foot.

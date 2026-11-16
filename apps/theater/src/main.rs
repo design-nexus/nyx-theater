@@ -53,7 +53,7 @@ fn main() -> glib::ExitCode {
     // Keep the same GL renderer choice as Media Player on hybrid GPU laptops.
     if std::env::var_os("GSK_RENDERER").is_none() {
         // SAFETY: no threads or GTK have started yet.
-        unsafe { std::env::set_var("GSK_RENDERER", "ngl") };
+        unsafe { std::env::set_var("GSK_RENDERER", "gl") };
     }
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--help" || a == "-h") {

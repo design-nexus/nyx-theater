@@ -7,6 +7,25 @@ use nyx_core::control::text;
 use nyx_media_model::{ItemId, MediaItem, MediaKind};
 use serde_json::{Value, json};
 
+/// Theater's description for the control interface (API 2): its actions, the `nyx`
+/// command's `theater` namespace, and D-Bus activation so a call starts it (with its
+/// window, which holds the media servers' connections).
+pub fn description(app_id: &str) -> Value {
+    let mut tools = tools();
+    for t in tools.as_array_mut().into_iter().flatten() {
+        let risk = match t["name"].as_str().unwrap_or_default() {
+            "theater.search" | "theater.continue_watching" | "theater.now_playing" => "read_only",
+            _ => "writes",
+        };
+        t["x-nyx"] = json!({"risk": risk});
+    }
+    json!({
+        "tools": tools,
+        "nyx": {"api": 2, "app": app_id, "name": "Theater", "icon": "io.github.design_nexus.nyx.Theater", "namespaces": ["theater"],
+                "aliases": [], "bus_name": app_id, "activation": "dbus", "default": "theater.search"}
+    })
+}
+
 pub fn tools() -> Value {
     let id = json!({"type": "string", "description": "An id from theater.search or theater.continue_watching"});
     json!([

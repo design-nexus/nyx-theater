@@ -212,10 +212,11 @@ fn get_one(job: &Job) -> Option<Vec<u8>> {
     }
     static LAST_TRIM: OnceLock<Mutex<Instant>> = OnceLock::new();
     if let Ok(mut last) = LAST_TRIM.get_or_init(|| Mutex::new(Instant::now() - std::time::Duration::from_secs(60))).try_lock()
-        && last.elapsed().as_secs() >= 60 {
-            *last = Instant::now();
-            trim();
-        }
+        && last.elapsed().as_secs() >= 60
+    {
+        *last = Instant::now();
+        trim();
+    }
     Some(bytes)
 }
 fn trim() {
@@ -357,7 +358,8 @@ fn load_spec(art: &Artwork, server: &ServerId, mut keys: Vec<String>, width: u32
         // while hidden; one still off screen a while later is dropped and reloads on map.
         let (root, picture, placeholder) = (root.downgrade(), held_picture.clone(), held_placeholder.clone());
         glib::timeout_add_seconds_local_once(RELEASE_AFTER_SECS, move || {
-            let (Some(root), Some(picture), Some(placeholder)) = (root.upgrade(), picture.upgrade(), placeholder.upgrade()) else {
+            let (Some(root), Some(picture), Some(placeholder)) = (root.upgrade(), picture.upgrade(), placeholder.upgrade())
+            else {
                 return;
             };
             if !root.is_mapped() && picture.paintable().is_some() {

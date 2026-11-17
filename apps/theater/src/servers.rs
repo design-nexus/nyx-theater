@@ -200,9 +200,10 @@ impl Catalog {
         if let Some((_, watch)) = self.watch.get(&item.id) {
             item.watch = watch.clone()
         } else if let Some(current) = self.position(&item.id).map(|i| &self.items[i])
-            && current.watch.updated_at > item.watch.updated_at {
-                item.watch = current.watch.clone()
-            }
+            && current.watch.updated_at > item.watch.updated_at
+        {
+            item.watch = current.watch.clone()
+        }
         item
     }
     pub fn confirmed(&mut self, item: &MediaItem, children: &[MediaItem], started: i64) {

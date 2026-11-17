@@ -113,7 +113,10 @@ mod tests {
             Command::new("sh").args(["-c", &format!("printf '{stderr}' >&2; exit {code}")]).output().unwrap()
         };
         assert_eq!(missing_or_failed(&output(1, "")), ProviderError::AuthenticationRequired);
-        assert_ne!(missing_or_failed(&output(1, "secret-tool: Cannot create an item in a locked collection")), ProviderError::AuthenticationRequired);
+        assert_ne!(
+            missing_or_failed(&output(1, "secret-tool: Cannot create an item in a locked collection")),
+            ProviderError::AuthenticationRequired
+        );
         assert_ne!(missing_or_failed(&output(2, "")), ProviderError::AuthenticationRequired);
     }
 }

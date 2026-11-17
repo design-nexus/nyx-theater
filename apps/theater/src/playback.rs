@@ -200,7 +200,8 @@ impl Playback {
                                     failed = true;
                                 } else {
                                     p.early_end_at = Some(at);
-                                    retry = Some((at, p.paused, p.remote.as_ref().map(|r| r.mode).unwrap_or(PlaybackMode::Direct)));
+                                    retry =
+                                        Some((at, p.paused, p.remote.as_ref().map(|r| r.mode).unwrap_or(PlaybackMode::Direct)));
                                 }
                                 p.loaded = false;
                             }
@@ -247,16 +248,25 @@ impl Playback {
                 if p.duration - p.position > prefs.up_next_seconds.min(30) as f64 {
                     p.up_next_offered = false;
                 }
-                let preview = if p.loaded && !p.paused && !p.up_next_offered && prefs.autoplay_next
-                    && prefs.up_next_seconds > 0 && p.duration > 60.0
+                let preview = if p.loaded
+                    && !p.paused
+                    && !p.up_next_offered
+                    && prefs.autoplay_next
+                    && prefs.up_next_seconds > 0
+                    && p.duration > 60.0
                     && p.duration - p.position <= prefs.up_next_seconds.min(30) as f64
-                    && !crate::playlists::has_queue() {
+                    && !crate::playlists::has_queue()
+                {
                     p.up_next_offered = true;
                     p.remote.as_ref().map(|r| r.media.clone())
-                } else { None };
+                } else {
+                    None
+                };
                 let failed_position = (p.position.max(0.0) * 1000.0) as u64;
                 drop(p);
-                if let Some(item) = preview && let Some(next) = crate::library::next_episode(&item) {
+                if let Some(item) = preview
+                    && let Some(next) = crate::library::next_episode(&item)
+                {
                     crate::window::preview_up_next(next);
                 }
                 if completed {
@@ -446,13 +456,10 @@ impl Playback {
     }
     fn report(&mut self, force: bool) {
         if let Some(remote) = &mut self.remote
-            && (force || remote.reported.elapsed().as_secs() >= 10) {
-                remote.send(
-                    if self.paused { PlaybackState::Paused } else { PlaybackState::Playing },
-                    self.position,
-                    self.duration,
-                );
-            }
+            && (force || remote.reported.elapsed().as_secs() >= 10)
+        {
+            remote.send(if self.paused { PlaybackState::Paused } else { PlaybackState::Playing }, self.position, self.duration);
+        }
     }
     fn finish_remote(&mut self) {
         if let Some(mut remote) = self.remote.take() {
@@ -489,10 +496,12 @@ impl Playback {
             });
         }
         self.set_string(property, id);
-        if property == "sid" && self.burned_subtitle.is_some()
-            && let Some(requests) = &self.requests {
-                let _ = requests.try_send((self.position, self.paused, PlaybackMode::Transcode));
-            }
+        if property == "sid"
+            && self.burned_subtitle.is_some()
+            && let Some(requests) = &self.requests
+        {
+            let _ = requests.try_send((self.position, self.paused, PlaybackMode::Transcode));
+        }
     }
     pub fn subtitles_burned(&self) -> bool {
         self.burned_subtitle.is_some()

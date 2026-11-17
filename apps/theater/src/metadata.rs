@@ -73,9 +73,10 @@ pub fn key(i: &MediaItem) -> String {
 }
 pub fn apply(i: &mut MediaItem) {
     if let Some(h) = HUB.get()
-        && let Some(c) = h.data.read().unwrap().get(&key(i)) {
-            i.metadata.supplement(&c.metadata);
-        }
+        && let Some(c) = h.data.read().unwrap().get(&key(i))
+    {
+        i.metadata.supplement(&c.metadata);
+    }
 }
 pub fn provider_ratings_fresh(item: &MediaItem) -> bool {
     HUB.get().and_then(|h| h.data.read().ok()?.get(&key(item)).map(|c| now() - c.plex_at < 86400)).unwrap_or(false)
@@ -109,12 +110,13 @@ fn store_provider_ratings_at(items: &[MediaItem], fetched_at: i64) {
             c.clone()
         };
         if let Some(db) = &db
-            && let Ok(body) = serde_json::to_string(&cached) {
-                let _ = db.execute(
-                    "INSERT INTO enrichment VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET body=excluded.body",
-                    params![id, body],
-                );
-            }
+            && let Ok(body) = serde_json::to_string(&cached)
+        {
+            let _ = db.execute(
+                "INSERT INTO enrichment VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET body=excluded.body",
+                params![id, body],
+            );
+        }
     }
 }
 pub fn personal(i: &MediaItem) -> Option<u32> {
@@ -238,24 +240,27 @@ fn run(h: Arc<Hub>) {
     let db = cache_db();
     if let Some(db) = &db
         && let Ok(mut s) = db.prepare("SELECT id,body FROM enrichment")
-            && let Ok(rows) = s.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))) {
-                let mut data = HashMap::new();
-                for row in rows.flatten() {
-                    if let Ok(c) = serde_json::from_str(&row.1) {
-                        data.insert(row.0, c);
-                    }
-                }
-                *h.data.write().unwrap() = data;
+        && let Ok(rows) = s.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+    {
+        let mut data = HashMap::new();
+        for row in rows.flatten() {
+            if let Ok(c) = serde_json::from_str(&row.1) {
+                data.insert(row.0, c);
             }
-    if let Ok(cache) = crate::servers::database()
-        && let Ok(items) = cache.detail_ratings() {
-            store_provider_ratings_at(&items, 0);
         }
+        *h.data.write().unwrap() = data;
+    }
+    if let Ok(cache) = crate::servers::database()
+        && let Ok(items) = cache.detail_ratings()
+    {
+        store_provider_ratings_at(&items, 0);
+    }
     if let Ok(db) = user_db()
         && let Ok(mut s) = db.prepare("SELECT id,value FROM ratings")
-            && let Ok(rows) = s.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, u32>(1)?))) {
-                h.ratings.write().unwrap().extend(rows.flatten());
-            }
+        && let Ok(rows) = s.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, u32>(1)?)))
+    {
+        h.ratings.write().unwrap().extend(rows.flatten());
+    }
     let _ = h.notify.try_send(());
     let Ok(http) = http() else { return };
     let mut epoch = u64::MAX;
@@ -352,12 +357,13 @@ fn run(h: Arc<Hub>) {
                             data.insert(id.clone(), cached.clone());
                         }
                         if let Some(db) = &db
-                            && let Ok(body) = serde_json::to_string(&cached) {
-                                let _ = db.execute(
-                                    "INSERT INTO enrichment VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET body=excluded.body",
-                                    params![id, body],
-                                );
-                            }
+                            && let Ok(body) = serde_json::to_string(&cached)
+                        {
+                            let _ = db.execute(
+                                "INSERT INTO enrichment VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET body=excluded.body",
+                                params![id, body],
+                            );
+                        }
                     }
                     Ok(None) => {
                         attempts.insert((id.clone(), name), now() + 86400);
@@ -456,18 +462,20 @@ fn fetch_tmdb(
     cfg: &Config,
 ) -> Result<Option<Metadata>, FetchError> {
     let mut route = tmdb_route(item, all);
-    if route.is_none() && matches!(item.kind, MediaKind::Movie | MediaKind::Series)
-        && let Some(imdb) = item.external_ids.imdb.as_deref().filter(|s| s.starts_with("tt") && s.len() > 2 && digits(&s[2..])) {
-            let v = json(
-                http.get(format!("https://api.themoviedb.org/3/find/{imdb}"))
-                    .bearer_auth(secret.expose())
-                    .query(&[("external_source", "imdb_id")]),
-            )?;
-            let field = if item.kind == MediaKind::Movie { "movie_results" } else { "tv_results" };
-            if let Some(id) = v[field].as_array().filter(|a| a.len() == 1).and_then(|a| a[0]["id"].as_u64()) {
-                route = Some(format!("{}/{id}", if item.kind == MediaKind::Movie { "movie" } else { "tv" }));
-            }
+    if route.is_none()
+        && matches!(item.kind, MediaKind::Movie | MediaKind::Series)
+        && let Some(imdb) = item.external_ids.imdb.as_deref().filter(|s| s.starts_with("tt") && s.len() > 2 && digits(&s[2..]))
+    {
+        let v = json(
+            http.get(format!("https://api.themoviedb.org/3/find/{imdb}"))
+                .bearer_auth(secret.expose())
+                .query(&[("external_source", "imdb_id")]),
+        )?;
+        let field = if item.kind == MediaKind::Movie { "movie_results" } else { "tv_results" };
+        if let Some(id) = v[field].as_array().filter(|a| a.len() == 1).and_then(|a| a[0]["id"].as_u64()) {
+            route = Some(format!("{}/{id}", if item.kind == MediaKind::Movie { "movie" } else { "tv" }));
         }
+    }
     let Some(route) = route else { return Ok(None) };
     let v = tmdb_json(http, &route, secret, cfg, "credits,recommendations,videos,release_dates,content_ratings,external_ids")?;
     let m = parse_tmdb(&v, &route, &cfg.region);
@@ -515,16 +523,17 @@ fn parse_tmdb(v: &Value, route: &str, region: &str) -> Metadata {
         ..Default::default()
     };
     if let Some(score) = v["vote_average"].as_f64().filter(|s| s.is_finite() && *s >= 0.0 && *s <= 10.0)
-        && v["vote_count"].as_u64().unwrap_or(0) > 0 {
-            m.ratings.push(Rating {
-                source: "tmdb".into(),
-                value: (score * 100.0).round() as u32,
-                scale: 1000,
-                votes: v["vote_count"].as_u64(),
-                url: Some(format!("https://www.themoviedb.org/{route}")),
-                fetched_at: now(),
-            });
-        }
+        && v["vote_count"].as_u64().unwrap_or(0) > 0
+    {
+        m.ratings.push(Rating {
+            source: "tmdb".into(),
+            value: (score * 100.0).round() as u32,
+            scale: 1000,
+            votes: v["vote_count"].as_u64(),
+            url: Some(format!("https://www.themoviedb.org/{route}")),
+            fetched_at: now(),
+        });
+    }
     m.certification = v["content_ratings"]["results"]
         .as_array()
         .into_iter()
@@ -655,9 +664,10 @@ pub fn person(id: u64, cfg: Config) -> Result<Person, ProviderError> {
         })
         .and_then(|(s, t)| Some((serde_json::from_str::<Person>(&s).ok()?, t)));
     if let Some((p, t)) = &cached
-        && now() - t < 604800 {
-            return Ok(p.clone());
-        }
+        && now() - t < 604800
+    {
+        return Ok(p.clone());
+    }
     let fetch = || {
         let secret = crate::credentials::load_for("tmdb", "metadata")?;
         let v = tmdb_json(&http()?, &format!("person/{id}"), &secret, &cfg, "combined_credits")

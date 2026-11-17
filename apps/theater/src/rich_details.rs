@@ -168,7 +168,8 @@ fn your_rating(i: &MediaItem) -> gtk::Button {
     button.add_css_class("rating-chip");
     button.add_css_class("rating-you");
     let content = widgets::hbox(5);
-    let star = gtk::Image::from_icon_name(if metadata::personal(i).is_some() { "starred-symbolic" } else { "non-starred-symbolic" });
+    let star =
+        gtk::Image::from_icon_name(if metadata::personal(i).is_some() { "starred-symbolic" } else { "non-starred-symbolic" });
     star.set_pixel_size(13);
     content.append(&star);
     content.append(&widgets::label("Your rating", "rating-score"));
@@ -276,7 +277,10 @@ pub fn about(body: &gtk::Box, i: &MediaItem) {
             label.set_max_width_chars(24);
             label.set_ellipsize(gtk::pango::EllipsizeMode::End);
         }
-        button.set_tooltip_text(Some(&format!("More {}", if field == "genres" { format!("{name} titles") } else { format!("from {name}") })));
+        button.set_tooltip_text(Some(&format!(
+            "More {}",
+            if field == "genres" { format!("{name} titles") } else { format!("from {name}") }
+        )));
         let field = field.to_owned();
         let value = name.clone();
         let tv = i.kind != MediaKind::Movie;
@@ -343,11 +347,12 @@ fn photo(art: &Artwork, path: &str, item: Option<&MediaItem>) {
     glib::spawn_future_local(async move {
         if let Ok(Some(path)) = rx.recv().await
             && let (Some(picture), Some(placeholder)) = (picture.upgrade(), placeholder.upgrade())
-                && let Ok(texture) = gtk::gdk::Texture::from_file(&gtk::gio::File::for_path(path)) {
-                    picture.set_paintable(Some(&texture));
-                    picture.set_visible(true);
-                    placeholder.set_visible(false);
-                }
+            && let Ok(texture) = gtk::gdk::Texture::from_file(&gtk::gio::File::for_path(path))
+        {
+            picture.set_paintable(Some(&texture));
+            picture.set_visible(true);
+            placeholder.set_visible(false);
+        }
     });
 }
 /// Up to two initials for a face with no photo.
@@ -404,7 +409,11 @@ pub fn people(body: &gtk::Box, i: &MediaItem) {
         let button = gtk::Button::new();
         button.add_css_class("cast-card");
         button.set_child(Some(&card));
-        button.set_tooltip_text(Some(&format!("{} · {}", credit.name, if credit.role.is_empty() { &credit.department } else { &credit.role })));
+        button.set_tooltip_text(Some(&format!(
+            "{} · {}",
+            credit.name,
+            if credit.role.is_empty() { &credit.department } else { &credit.role }
+        )));
         let c = credit.clone();
         let origin = i.clone();
         button.connect_clicked(move |_| person(c.clone(), origin.clone()));
@@ -454,14 +463,16 @@ pub fn television(body: &gtk::Box, i: &MediaItem, children: &[MediaItem]) {
         let row = widgets::hbox(4);
         let play = nyx_ui::widgets::icon_button("media-playback-start-symbolic", "Play next unwatched episode");
         let episode = next.clone();
-        play.connect_clicked(move |_| { library::play_item(&episode, false); });
+        play.connect_clicked(move |_| {
+            library::play_item(&episode, false);
+        });
         row.append(&play);
         let button = gtk::Button::with_label(&format!(
-                "Next unwatched · S{} E{} · {}",
-                next.season_number.unwrap_or(0),
-                next.episode_number.unwrap_or(0),
-                next.title
-            ));
+            "Next unwatched · S{} E{} · {}",
+            next.season_number.unwrap_or(0),
+            next.episode_number.unwrap_or(0),
+            next.title
+        ));
         let next = next.clone();
         button.connect_clicked(move |_| library::show_detail(next.clone()));
         row.append(&button);
@@ -659,7 +670,9 @@ fn person(credit: Credit, origin: MediaItem) {
             let lookup: std::collections::HashMap<_, _> = snapshot
                 .items()
                 .filter(|i| matches!(i.kind, MediaKind::Movie | MediaKind::Series))
-                .filter_map(|i| Some(((i.kind == MediaKind::Series, i.external_ids.tmdb.as_deref()?.parse::<u64>().ok()?), i.clone())))
+                .filter_map(|i| {
+                    Some(((i.kind == MediaKind::Series, i.external_ids.tmdb.as_deref()?.parse::<u64>().ok()?), i.clone()))
+                })
                 .collect();
             let films = std::mem::take(&mut person.titles)
                 .into_iter()
@@ -753,7 +766,8 @@ mod related_tests {
         let other = item("3", "show", "300", None, false);
         let guest = item("4", "episode", "400", Some("3"), true);
         let movie = item("5", "movie", "500", None, true);
-        let snapshot = crate::catalog::Snapshot::of(vec![show.clone(), episode.clone(), duplicate, other.clone(), guest, movie.clone()]);
+        let snapshot =
+            crate::catalog::Snapshot::of(vec![show.clone(), episode.clone(), duplicate, other.clone(), guest, movie.clone()]);
         let rows = related_rows(&episode, &snapshot);
         let titles = &rows.iter().find(|(name, _)| name == "More with Actor").unwrap().1;
         assert!(titles.iter().all(|i| matches!(i.kind, MediaKind::Movie | MediaKind::Series)));

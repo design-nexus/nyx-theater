@@ -233,15 +233,11 @@ fn fetch(
         pending.extend(page.items.iter().cloned());
         items.extend(page.items);
         if items.len() > crate::servers::MAX_TITLES {
-            return Err(ProviderError::Failed(format!(
-                "more than {} titles of one kind",
-                crate::servers::MAX_TITLES
-            )));
+            return Err(ProviderError::Failed(format!("more than {} titles of one kind", crate::servers::MAX_TITLES)));
         }
-        if (next.is_none() || pending.len() >= 500 || page.next.is_none())
-            && !pending.is_empty() {
-                publish(std::mem::take(&mut pending))?;
-            }
+        if (next.is_none() || pending.len() >= 500 || page.next.is_none()) && !pending.is_empty() {
+            publish(std::mem::take(&mut pending))?;
+        }
         next = page.next;
         if next.is_none() {
             return Ok(items);
@@ -278,14 +274,17 @@ fn sync(full: bool) {
             if cancelled.load(Ordering::Relaxed) {
                 return Err(ProviderError::Failed("Refresh cancelled".into()));
             }
-            let saved = credentials::load(&settings.address).and_then(|secret| Client::reconnect(&settings.address, secret, &client_id));
+            let saved =
+                credentials::load(&settings.address).and_then(|secret| Client::reconnect(&settings.address, secret, &client_id));
             let client = match saved {
                 Ok(client) => client,
                 // The server moved (a new address), or its token was replaced or isn't saved there.
-                Err(e @ (ProviderError::Offline | ProviderError::AuthenticationRequired)) => match rediscover(&settings, &client_id) {
-                    Some(Ok(client)) => client,
-                    _ => return Err(e),
-                },
+                Err(e @ (ProviderError::Offline | ProviderError::AuthenticationRequired)) => {
+                    match rediscover(&settings, &client_id) {
+                        Some(Ok(client)) => client,
+                        _ => return Err(e),
+                    }
+                }
                 Err(e) => return Err(e),
             };
             let libraries = client.list_libraries()?;
@@ -308,7 +307,8 @@ fn sync(full: bool) {
                 let loaded = (|| {
                     if let (crate::sync::Plan::Since(since), Some(marks)) =
                         (crate::sync::plan(marks.as_ref(), kinds(library).len(), sync_started, full), &marks)
-                        && let Some((items, counts)) = incremental(&client, &cache, library, marks, since, &cancelled, &mut batch)?
+                        && let Some((items, counts)) =
+                            incremental(&client, &cache, library, marks, since, &cancelled, &mut batch)?
                     {
                         return Ok((items, counts, false));
                     }
@@ -451,7 +451,10 @@ fn sync(full: bool) {
                             if skipped.is_empty() {
                                 window::status(&format!("Plex connected · {count} titles"));
                             } else {
-                                window::status(&format!("Plex connected · {count} titles · couldn't refresh {}", skipped.join(", ")));
+                                window::status(&format!(
+                                    "Plex connected · {count} titles · couldn't refresh {}",
+                                    skipped.join(", ")
+                                ));
                             }
                         }
                         Err(error) => {

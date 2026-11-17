@@ -273,7 +273,9 @@ pub fn build(player: &Rc<RefCell<Playback>>) -> gtk::Overlay {
     let last_title = RefCell::new(String::new());
     let last_chapters = RefCell::new(serde_json::Value::Null);
     glib::timeout_add_local(Duration::from_millis(200), move || {
-        let (Some(player), Some(overlay)) = (weak_player.upgrade(), weak_overlay.upgrade()) else { return glib::ControlFlow::Break };
+        let (Some(player), Some(overlay)) = (weak_player.upgrade(), weak_overlay.upgrade()) else {
+            return glib::ControlFlow::Break;
+        };
         // Nothing to update while the player page isn't on screen.
         if !overlay.is_mapped() {
             return glib::ControlFlow::Continue;

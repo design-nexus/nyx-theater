@@ -95,13 +95,8 @@ fn continuing(item: &MediaItem) -> bool {
 fn fresh(home: &Home) -> Vec<MediaItem> {
     let started: std::collections::HashSet<_> =
         home.continuing.iter().flat_map(|i| [Some(i.id.clone()), i.series.clone()]).flatten().collect();
-    let mut fresh: Vec<_> = home
-        .movies
-        .iter()
-        .chain(&home.tv)
-        .filter(|i| !started.contains(&i.id) && !i.watch.watched)
-        .cloned()
-        .collect();
+    let mut fresh: Vec<_> =
+        home.movies.iter().chain(&home.tv).filter(|i| !started.contains(&i.id) && !i.watch.watched).cloned().collect();
     fresh.sort_by_key(|i| std::cmp::Reverse(i.added_at.max(i.metadata.latest_episode_added)));
     fresh.sort_by_key(|i| i.backdrop.is_none());
     fresh.truncate(4);
@@ -174,21 +169,28 @@ impl Worker {
                 let rebuilt = request.items.is_some();
                 // Progress alone changes a few titles; the saved page can catch up at the next rebuild.
                 let save = rebuilt || request.watch.is_empty();
-                if rebuilt || !request.watch.is_empty() { prepared.clear(); prepared_order.clear(); }
+                if rebuilt || !request.watch.is_empty() {
+                    prepared.clear();
+                    prepared_order.clear();
+                }
                 if let Some(key) = scope.as_ref()
                     && request.items.is_none()
-                    && let Some(cached) = prepared.get(key) {
-                        let mut view = cached.clone();
-                        view.generation = request.generation;
-                        let state = mailbox.0.lock().unwrap();
-                        if !state.stopped && state.request.is_none() { let _ = tx.try_send(view); }
-                        continue;
+                    && let Some(cached) = prepared.get(key)
+                {
+                    let mut view = cached.clone();
+                    view.generation = request.generation;
+                    let state = mailbox.0.lock().unwrap();
+                    if !state.stopped && state.request.is_none() {
+                        let _ = tx.try_send(view);
                     }
+                    continue;
+                }
                 if index.groups.is_empty()
                     && let Some(key) = scope.as_ref().filter(|key| restored.insert((*key).clone()))
-                    && let Some(cached) = crate::view_cache::load(&root, key, request.generation) {
-                        let _ = tx.try_send(cached);
-                    }
+                    && let Some(cached) = crate::view_cache::load(&root, key, request.generation)
+                {
+                    let _ = tx.try_send(cached);
+                }
                 let view = index.prepare(request);
                 if rebuilt {
                     crate::trim_heap();
@@ -207,20 +209,26 @@ impl Worker {
                 let state = mailbox.0.lock().unwrap();
                 let current = !state.stopped && state.request.is_none();
                 drop(state);
-                if !current { continue; }
+                if !current {
+                    continue;
+                }
                 if let Some(key) = &scope {
                     if !prepared.contains_key(key) {
                         prepared_order.push_back(key.clone());
                     }
                     prepared.insert(key.clone(), view.clone());
                     while prepared_order.len() > 3 {
-                        if let Some(old) = prepared_order.pop_front() { prepared.remove(&old); }
+                        if let Some(old) = prepared_order.pop_front() {
+                            prepared.remove(&old);
+                        }
                     }
                 }
                 if tx.try_send(view.clone()).is_err() {
                     break;
                 }
-                if let Some(key) = scope.filter(|_| save) { let _ = save_tx.try_send((key, view)); }
+                if let Some(key) = scope.filter(|_| save) {
+                    let _ = save_tx.try_send((key, view));
+                }
             }
         });
         (worker, rx)
@@ -472,7 +480,10 @@ impl Index {
                             "collections" => Some(MediaKind::Collection),
                             _ => None,
                         };
-                        let sources = sources.into_iter().filter(|i| kind.is_some() || matches!(i.kind, MediaKind::Movie | MediaKind::Series)).collect();
+                        let sources = sources
+                            .into_iter()
+                            .filter(|i| kind.is_some() || matches!(i.kind, MediaKind::Movie | MediaKind::Series))
+                            .collect();
                         select(&UnifiedItem { sources }, kind, false)
                     } else {
                         select(group, kind, false)
@@ -580,7 +591,8 @@ mod tests {
         }
         let mut index = Index::default();
         let mut input = request(4);
-        input.items = Some((0..10).map(|n| MediaItem { id: ItemId { id: n.to_string(), ..item.id.clone() }, ..item.clone() }).collect());
+        input.items =
+            Some((0..10).map(|n| MediaItem { id: ItemId { id: n.to_string(), ..item.id.clone() }, ..item.clone() }).collect());
         index.prepare(input);
         let mut progress = request(5);
         let id = ItemId { id: "7".into(), ..item.id.clone() };

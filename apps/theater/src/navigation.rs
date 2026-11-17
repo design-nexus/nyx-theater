@@ -17,7 +17,9 @@ impl Swipe {
         self.y += y.abs();
     }
     fn direction(&self) -> i8 {
-        if !self.active || self.blocked || self.x.abs() < 120.0 || self.x.abs() <= self.y * 2.0 { return 0; }
+        if !self.active || self.blocked || self.x.abs() < 120.0 || self.x.abs() <= self.y * 2.0 {
+            return 0;
+        }
         if self.x < 0.0 { -1 } else { 1 }
     }
 }
@@ -67,8 +69,12 @@ pub fn install(window: &gtk::ApplicationWindow) {
     controller.connect_scroll_end(move |_| {
         let direction = state.borrow().direction();
         *state.borrow_mut() = Swipe::default();
-        if direction < 0 { crate::window::back(); }
-        if direction > 0 { crate::window::forward(); }
+        if direction < 0 {
+            crate::window::back();
+        }
+        if direction > 0 {
+            crate::window::forward();
+        }
     });
     window.add_controller(controller);
 }

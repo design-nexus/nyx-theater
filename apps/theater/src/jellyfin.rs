@@ -99,9 +99,10 @@ fn scope(items: &mut [MediaItem], known: &[MediaItem]) {
     let libraries: std::collections::HashMap<_, _> = known.iter().map(|i| (&i.id, &i.library_id)).collect();
     for item in items {
         if item.library_id.is_empty()
-            && let Some(library) = libraries.get(&item.id).or_else(|| item.series.as_ref().and_then(|id| libraries.get(id))) {
-                item.library_id = (*library).clone()
-            }
+            && let Some(library) = libraries.get(&item.id).or_else(|| item.series.as_ref().and_then(|id| libraries.get(id)))
+        {
+            item.library_id = (*library).clone()
+        }
     }
 }
 /// At startup: libraries synced recently fetch only what changed.
@@ -180,7 +181,8 @@ fn sync(full: bool) {
                 let marks = cache.sync_marks(client.server_id(), &library.id).ok().flatten();
                 let sync_started = crate::sync::now_secs();
                 let loaded = (|| {
-                    if let (crate::sync::Plan::Since(since), Some(marks)) = (crate::sync::plan(marks.as_ref(), 1, sync_started, full), &marks)
+                    if let (crate::sync::Plan::Since(since), Some(marks)) =
+                        (crate::sync::plan(marks.as_ref(), 1, sync_started, full), &marks)
                         && let Some((items, counts)) = incremental(&client, &cache, library, marks, since, &cancelled)?
                     {
                         publish(Update::Batch(items.clone()))?;
@@ -348,10 +350,10 @@ pub fn disconnect() {
 }
 fn settings_server() -> ServerId {
     // Settings can be gone by the time a worker reports back; no server is no match.
-    prefs::get().jellyfin.map(|j| j.server).unwrap_or_else(|| nyx_media_model::ServerId {
-        provider: nyx_media_model::ProviderKind::Jellyfin,
-        id: String::new(),
-    })
+    prefs::get()
+        .jellyfin
+        .map(|j| j.server)
+        .unwrap_or_else(|| nyx_media_model::ServerId { provider: nyx_media_model::ProviderKind::Jellyfin, id: String::new() })
 }
 pub fn connect_dialog() {
     let (dialog, card) = crate::widgets::dialog("Connect Jellyfin", 520);

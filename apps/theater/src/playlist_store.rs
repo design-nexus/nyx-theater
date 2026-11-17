@@ -31,9 +31,10 @@ impl Playlist {
     }
     pub fn move_entry(&mut self, id: &str, delta: isize) {
         if let Some(index) = self.entries.iter().position(|e| e.id == id)
-            && let Some(next) = index.checked_add_signed(delta).filter(|&n| n < self.entries.len()) {
-                self.entries.swap(index, next);
-            }
+            && let Some(next) = index.checked_add_signed(delta).filter(|&n| n < self.entries.len())
+        {
+            self.entries.swap(index, next);
+        }
     }
 }
 pub struct Store(Connection);

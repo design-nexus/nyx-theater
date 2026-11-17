@@ -19,9 +19,10 @@ pub fn save(root: &Path, key: &str, view: &View) {
         return;
     }
     if let Ok(data) = serde_json::to_vec(view)
-        && data.len() <= 32 * 1024 * 1024 {
-            let _ = nyx_core::cmd::atomic_write(&path(root, key), data);
-        }
+        && data.len() <= 32 * 1024 * 1024
+    {
+        let _ = nyx_core::cmd::atomic_write(&path(root, key), data);
+    }
     prune(root, KEPT);
 }
 /// Snapshots kept: one per page, sort, filter and server set seen, so the newest few

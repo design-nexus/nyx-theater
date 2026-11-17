@@ -88,7 +88,11 @@ fn card(item: &MediaItem, parent_count: bool, width: i32) -> (Artwork, PosterCar
     play.set_halign(gtk::Align::Center);
     play.set_valign(gtk::Align::Center);
     let selected = item.clone();
-    play.connect_clicked(move |_| { if !play_item(&selected, false) { window::status("No playable video is available."); } });
+    play.connect_clicked(move |_| {
+        if !play_item(&selected, false) {
+            window::status("No playable video is available.");
+        }
+    });
     art.root.add_overlay(&play);
     let selected = item.clone();
     let root = card.root.downgrade();
@@ -96,10 +100,12 @@ fn card(item: &MediaItem, parent_count: bool, width: i32) -> (Artwork, PosterCar
     click.set_button(gtk::gdk::BUTTON_PRIMARY);
     click.connect_released(move |_, _, x, y| {
         let Some(root) = root.upgrade() else { return };
-        let button = root.pick(x, y, gtk::PickFlags::DEFAULT).is_some_and(|w| {
-            w.is::<gtk::Button>() || w.ancestor(gtk::Button::static_type()).is_some()
-        });
-        if !button { show_detail(selected.clone()); }
+        let button = root
+            .pick(x, y, gtk::PickFlags::DEFAULT)
+            .is_some_and(|w| w.is::<gtk::Button>() || w.ancestor(gtk::Button::static_type()).is_some());
+        if !button {
+            show_detail(selected.clone());
+        }
     });
     card.root.add_controller(click);
     attach_item_menu(&card.root, item, true);
@@ -165,17 +171,30 @@ fn grid(key: &str) -> (gtk::Box, gio::ListStore) {
         let Some(value) = row.item().and_downcast::<glib::BoxedAnyObject>() else { return };
         row.set_child(Some(&list_card(&value.borrow::<MediaItem>())));
     });
-    list_factory.connect_unbind(|_, obj| if let Some(row) = obj.downcast_ref::<gtk::ListItem>() { row.set_child(None::<&gtk::Widget>); });
+    list_factory.connect_unbind(|_, obj| {
+        if let Some(row) = obj.downcast_ref::<gtk::ListItem>() {
+            row.set_child(None::<&gtk::Widget>);
+        }
+    });
     let list = gtk::ListView::new(Some(gtk::NoSelection::new(Some(store.clone()))), Some(list_factory));
     list.add_css_class("theater-media-list");
-    let list_scroll = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never)
-        .vscrollbar_policy(gtk::PolicyType::External).vexpand(true).min_content_height(400).child(&list).build();
+    let list_scroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::External)
+        .vexpand(true)
+        .min_content_height(400)
+        .child(&list)
+        .build();
     let stack = gtk::Stack::new();
     stack.set_vexpand(true);
     stack.add_named(&scroll, Some("posters"));
     stack.add_named(&list_scroll, Some("list"));
     let list_key = key.to_owned();
-    stack.set_visible_child_name(if prefs::get().list_views.get(&list_key).copied().unwrap_or(false) { "list" } else { "posters" });
+    stack.set_visible_child_name(if prefs::get().list_views.get(&list_key).copied().unwrap_or(false) {
+        "list"
+    } else {
+        "posters"
+    });
     let bar = widgets::hbox(8);
     bar.set_halign(gtk::Align::End);
     let toggle = nyx_ui::widgets::icon_button("view-list-symbolic", "Switch poster/list view");
@@ -184,7 +203,9 @@ fn grid(key: &str) -> (gtk::Box, gio::ListStore) {
         let Some(switch_stack) = switch_stack.upgrade() else { return };
         let show_list = switch_stack.visible_child_name().as_deref() != Some("list");
         switch_stack.set_visible_child_name(if show_list { "list" } else { "posters" });
-        prefs::update(|p| { p.list_views.insert(list_key.clone(), show_list); });
+        prefs::update(|p| {
+            p.list_views.insert(list_key.clone(), show_list);
+        });
     });
     bar.append(&toggle);
     let container = widgets::vbox(4);
@@ -207,7 +228,11 @@ pub fn list_card(item: &MediaItem) -> gtk::Box {
     play.set_halign(gtk::Align::Center);
     play.set_valign(gtk::Align::Center);
     let selected = item.clone();
-    play.connect_clicked(move |_| { if !play_item(&selected, false) { window::status("No playable video is available."); } });
+    play.connect_clicked(move |_| {
+        if !play_item(&selected, false) {
+            window::status("No playable video is available.");
+        }
+    });
     art.root.add_overlay(&play);
     let selected = item.clone();
     let artwork_root = art.root.downgrade();
@@ -215,10 +240,12 @@ pub fn list_card(item: &MediaItem) -> gtk::Box {
     click.set_button(gtk::gdk::BUTTON_PRIMARY);
     click.connect_released(move |_, _, x, y| {
         let Some(root) = artwork_root.upgrade() else { return };
-        let button = root.pick(x, y, gtk::PickFlags::DEFAULT).is_some_and(|w| {
-            w.is::<gtk::Button>() || w.ancestor(gtk::Button::static_type()).is_some()
-        });
-        if !button { show_detail(selected.clone()); }
+        let button = root
+            .pick(x, y, gtk::PickFlags::DEFAULT)
+            .is_some_and(|w| w.is::<gtk::Button>() || w.ancestor(gtk::Button::static_type()).is_some());
+        if !button {
+            show_detail(selected.clone());
+        }
     });
     art.root.add_controller(click);
     row.append(&art.root);
@@ -233,9 +260,16 @@ pub fn list_card(item: &MediaItem) -> gtk::Box {
     title_label.set_max_width_chars(1);
     title_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
     text.append(&title_label);
-    let facts = [subtitle, episode, item.year.map(|y| y.to_string()).unwrap_or_default(),
-        item.duration_ms.map(|d| format!("{} min", d / 60000)).unwrap_or_default()].into_iter()
-        .filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ");
+    let facts = [
+        subtitle,
+        episode,
+        item.year.map(|y| y.to_string()).unwrap_or_default(),
+        item.duration_ms.map(|d| format!("{} min", d / 60000)).unwrap_or_default(),
+    ]
+    .into_iter()
+    .filter(|s| !s.is_empty())
+    .collect::<Vec<_>>()
+    .join(" · ");
     let facts_label = widgets::label(&facts, "card-meta");
     facts_label.set_max_width_chars(1);
     facts_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -255,18 +289,22 @@ pub fn list_card(item: &MediaItem) -> gtk::Box {
     row
 }
 fn set(store: &gio::ListStore, items: Vec<MediaItem>) {
-    let old: Vec<_> = (0..store.n_items())
-        .filter_map(|n| store.item(n).and_downcast::<glib::BoxedAnyObject>())
-        .collect();
+    let old: Vec<_> = (0..store.n_items()).filter_map(|n| store.item(n).and_downcast::<glib::BoxedAnyObject>()).collect();
     let prefix = old.iter().zip(&items).take_while(|(a, b)| *a.borrow::<MediaItem>() == **b).count();
-    let suffix = old[prefix..].iter().rev().zip(items[prefix..].iter().rev())
-        .take_while(|(a, b)| *a.borrow::<MediaItem>() == **b).count();
-    let old_by_id: HashMap<_, _> = old[prefix..old.len() - suffix].iter()
-        .map(|obj| (obj.borrow::<MediaItem>().id.clone(), obj.clone())).collect();
-    let data: Vec<_> = items[prefix..items.len() - suffix].iter().map(|item| {
-        old_by_id.get(&item.id).filter(|obj| *obj.borrow::<MediaItem>() == *item).cloned()
-            .unwrap_or_else(|| glib::BoxedAnyObject::new(item.clone()))
-    }).collect();
+    let suffix =
+        old[prefix..].iter().rev().zip(items[prefix..].iter().rev()).take_while(|(a, b)| *a.borrow::<MediaItem>() == **b).count();
+    let old_by_id: HashMap<_, _> =
+        old[prefix..old.len() - suffix].iter().map(|obj| (obj.borrow::<MediaItem>().id.clone(), obj.clone())).collect();
+    let data: Vec<_> = items[prefix..items.len() - suffix]
+        .iter()
+        .map(|item| {
+            old_by_id
+                .get(&item.id)
+                .filter(|obj| *obj.borrow::<MediaItem>() == *item)
+                .cloned()
+                .unwrap_or_else(|| glib::BoxedAnyObject::new(item.clone()))
+        })
+        .collect();
     if prefix + suffix != old.len() || !data.is_empty() {
         store.splice(prefix as u32, (old.len() - prefix - suffix) as u32, &data);
     }
@@ -832,8 +870,7 @@ fn star_rating(item: &MediaItem) -> Option<String> {
 }
 /// Where a title is: "on Plex and Jellyfin", "on Plex".
 fn servers_line(item: &MediaItem) -> String {
-    let providers: Vec<_> =
-        logical_sources(item).iter().map(|s| s.id.server.provider).chain([item.id.server.provider]).collect();
+    let providers: Vec<_> = logical_sources(item).iter().map(|s| s.id.server.provider).chain([item.id.server.provider]).collect();
     let names: Vec<_> = [(ProviderKind::Plex, "Plex"), (ProviderKind::Jellyfin, "Jellyfin")]
         .into_iter()
         .filter(|(p, _)| providers.contains(p))
@@ -854,7 +891,9 @@ pub(crate) fn facts_line(item: &MediaItem, genres: usize) -> String {
     }
     facts.extend(item.year.map(|y| y.to_string()));
     match item.kind {
-        MediaKind::Series => facts.extend(item.metadata.season_count.map(|n| format!("{n} season{}", if n == 1 { "" } else { "s" }))),
+        MediaKind::Series => {
+            facts.extend(item.metadata.season_count.map(|n| format!("{n} season{}", if n == 1 { "" } else { "s" })))
+        }
         MediaKind::Movie | MediaKind::Episode => facts.extend(item.duration_ms.filter(|d| *d > 0).map(runtime)),
         _ => {}
     }
@@ -1003,7 +1042,11 @@ fn still_card(item: &MediaItem) -> (gtk::Widget, impl Fn(i32) + 'static) {
     name.set_ellipsize(gtk::pango::EllipsizeMode::End);
     name.set_max_width_chars(1);
     text.append(&name);
-    let left = item.duration_ms.map(|d| d.saturating_sub(item.watch.position_ms)).filter(|l| *l > 0).map(|l| format!("{} left", runtime(l)));
+    let left = item
+        .duration_ms
+        .map(|d| d.saturating_sub(item.watch.position_ms))
+        .filter(|l| *l > 0)
+        .map(|l| format!("{} left", runtime(l)));
     let place = match (item.season_number, item.episode_number) {
         (Some(s), Some(e)) if item.kind == MediaKind::Episode => Some(format!("S{s} · E{e}")),
         _ => item.year.map(|y| y.to_string()),
@@ -1017,7 +1060,9 @@ fn still_card(item: &MediaItem) -> (gtk::Widget, impl Fn(i32) + 'static) {
     progress.add_css_class("still-progress");
     progress.set_valign(gtk::Align::End);
     progress.set_can_target(false);
-    progress.set_fraction(item.duration_ms.filter(|d| *d > 0).map_or(0.0, |d| (item.watch.position_ms as f64 / d as f64).clamp(0.0, 1.0)));
+    progress.set_fraction(
+        item.duration_ms.filter(|d| *d > 0).map_or(0.0, |d| (item.watch.position_ms as f64 / d as f64).clamp(0.0, 1.0)),
+    );
     art.root.add_overlay(&progress);
     let selected = item.clone();
     let root = art.root.downgrade();
@@ -1025,7 +1070,9 @@ fn still_card(item: &MediaItem) -> (gtk::Widget, impl Fn(i32) + 'static) {
     click.set_button(gtk::gdk::BUTTON_PRIMARY);
     click.connect_released(move |_, _, x, y| {
         let Some(root) = root.upgrade() else { return };
-        let button = root.pick(x, y, gtk::PickFlags::DEFAULT).is_some_and(|w| w.is::<gtk::Button>() || w.ancestor(gtk::Button::static_type()).is_some());
+        let button = root
+            .pick(x, y, gtk::PickFlags::DEFAULT)
+            .is_some_and(|w| w.is::<gtk::Button>() || w.ancestor(gtk::Button::static_type()).is_some());
         if !button {
             show_detail(selected.clone());
         }
@@ -1075,7 +1122,9 @@ fn row(
         let mut previous: Option<gtk::Widget> = None;
         let mut cards = HashMap::new();
         for item in items {
-            let description = descriptions.and_then(|d| d.iter().find(|(id, _)| *id == item.id).map(|(_, text)| text.clone())).unwrap_or_default();
+            let description = descriptions
+                .and_then(|d| d.iter().find(|(id, _)| *id == item.id).map(|(_, text)| text.clone()))
+                .unwrap_or_default();
             let old = row.cards.remove(&item.id);
             let card = if old.as_ref().is_some_and(|(old, text, _)| old == &item && text == &description) {
                 old.unwrap().2
@@ -1123,9 +1172,10 @@ pub fn show_detail(item: MediaItem) {
     let item = servers::latest_watch(item);
     CURRENT.with(|current| {
         if let Some(previous) = current.borrow_mut().replace(item.clone())
-            && previous.id != item.id {
-                HISTORY.with(|h| h.borrow_mut().push(previous));
-            }
+            && previous.id != item.id
+        {
+            HISTORY.with(|h| h.borrow_mut().push(previous));
+        }
     });
     let generation = DETAIL_GENERATION.with(|g| {
         let next = g.get().wrapping_add(1);
@@ -1143,9 +1193,10 @@ pub fn show_detail(item: MediaItem) {
     std::thread::spawn(move || {
         let mut cache = servers::database().ok();
         if let Some((full, children)) = cache.as_ref().and_then(|cache| cache.details(&item.id).ok().flatten())
-            && send.send_blocking(Ok((full, children, true))).is_err() {
-                return;
-            }
+            && send.send_blocking(Ok((full, children, true))).is_err()
+        {
+            return;
+        }
         let result = (|| {
             let client = client.ok_or(ProviderError::Offline)?;
             let mut full = client.detail(&item.id)?;
@@ -1634,9 +1685,7 @@ fn resolve_choice(item: &MediaItem, choice: &PlaybackChoice) -> Option<(MediaIte
     }
 }
 fn choice_has_progress(item: &MediaItem, choice: &PlaybackChoice) -> bool {
-    resolve_choice(item, choice)
-        .map(|(source, _)| servers::latest_watch(source))
-        .is_some_and(|source| source.resume_ms() > 0)
+    resolve_choice(item, choice).map(|(source, _)| servers::latest_watch(source)).is_some_and(|source| source.resume_ms() > 0)
 }
 struct Fallback {
     sources: Vec<(MediaItem, String)>,
@@ -1693,7 +1742,9 @@ pub fn up_next(finished: &MediaItem) {
     if prefs::get().autoplay_next
         && let Some(next) = next_episode(finished)
     {
-        if crate::window::up_next_dismissed() { return; }
+        if crate::window::up_next_dismissed() {
+            return;
+        }
         if prefs::get().up_next_seconds == 0 {
             play_queued(&next);
         } else {
@@ -1795,9 +1846,14 @@ fn show_item_menu(anchor: &gtk::Widget, x: f64, y: f64, item: MediaItem, show_de
     }
     if show_details {
         let selected = item.clone();
-        menu_action(&popover, &menu, if item.kind == MediaKind::Collection { "Open collection" } else { "Show details" }, move || {
-            show_detail(selected.clone());
-        });
+        menu_action(
+            &popover,
+            &menu,
+            if item.kind == MediaKind::Collection { "Open collection" } else { "Show details" },
+            move || {
+                show_detail(selected.clone());
+            },
+        );
     }
     if item.kind == MediaKind::Episode
         && let Some(show) = episode_show(&item)
@@ -1867,8 +1923,12 @@ pub fn play_item(item: &MediaItem, from_start: bool) -> bool {
         return crate::control::next_up(item).is_some_and(|episode| play_item(&episode, from_start));
     }
     if item.kind == MediaKind::Season {
-        return crate::catalog::snapshot().episodes(&item.id).into_iter().filter(|e| !e.watch.watched)
-            .min_by_key(|e| e.episode_number).is_some_and(|episode| play_item(&episode, from_start));
+        return crate::catalog::snapshot()
+            .episodes(&item.id)
+            .into_iter()
+            .filter(|e| !e.watch.watched)
+            .min_by_key(|e| e.episode_number)
+            .is_some_and(|episode| play_item(&episode, from_start));
     }
     crate::playlists::clear_queue();
     match playback_choices(item).first() {
@@ -1882,10 +1942,11 @@ pub fn play_item(item: &MediaItem, from_start: bool) -> bool {
 
 pub fn play_queued(item: &MediaItem) -> bool {
     if let Some((_, choice)) = playback_choices(item).first()
-        && resolve_choice(item, choice).is_some() {
-            start_selected(item, choice, false, "auto");
-            return true;
-        }
+        && resolve_choice(item, choice).is_some()
+    {
+        start_selected(item, choice, false, "auto");
+        return true;
+    }
     false
 }
 fn start_selected(item: &MediaItem, choice: &PlaybackChoice, from_start: bool, mode: &str) {
@@ -1960,10 +2021,11 @@ pub fn set_browse(page: &str, state: crate::browse::State) {
     });
     UI.with(|u| {
         if let Some(u) = u.borrow_mut().as_mut()
-            && u.page == page {
-                u.filter = state.source;
-                u.sort = state.sort;
-            }
+            && u.page == page
+        {
+            u.filter = state.source;
+            u.sort = state.sort;
+        }
     });
     crate::rating_index::ensure(page, &prefs::browse_state(page).sort);
     refresh_grids();

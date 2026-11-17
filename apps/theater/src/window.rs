@@ -228,7 +228,8 @@ pub struct PlaylistRow {
 }
 /// Refill the Playlists group.
 pub fn set_playlists(lists: Vec<PlaylistRow>) {
-    let Some((rows, compact)) = UI.with(|u| u.borrow().as_ref().map(|u| (u.playlists.clone(), u.nav.has_css_class("compact")))) else {
+    let Some((rows, compact)) = UI.with(|u| u.borrow().as_ref().map(|u| (u.playlists.clone(), u.nav.has_css_class("compact"))))
+    else {
         return;
     };
     while let Some(child) = rows.first_child() {
@@ -244,7 +245,8 @@ pub fn set_playlists(lists: Vec<PlaylistRow>) {
         rows.append(&button);
     }
     for list in lists {
-        let (button, content) = nav_row("theater-playlist-symbolic", &list.title, (list.count > 0).then(|| thousands(list.count)));
+        let (button, content) =
+            nav_row("theater-playlist-symbolic", &list.title, (list.count > 0).then(|| thousands(list.count)));
         if let Some(server) = list.server {
             let sub = widgets::label(server, "nav-sub");
             sub.add_css_class("compact-hide");
@@ -343,7 +345,9 @@ pub fn preview_up_next(next: nyx_media_model::MediaItem) {
     show_up_next_card(next, true);
 }
 
-pub fn up_next_dismissed() -> bool { UP_NEXT_DISMISSED.with(|v| v.get()) }
+pub fn up_next_dismissed() -> bool {
+    UP_NEXT_DISMISSED.with(|v| v.get())
+}
 
 pub fn reset_up_next() {
     cancel_up_next();
@@ -351,7 +355,9 @@ pub fn reset_up_next() {
 }
 
 fn show_up_next_card(next: nyx_media_model::MediaItem, preview: bool) {
-    if up_next_dismissed() { return; }
+    if up_next_dismissed() {
+        return;
+    }
     cancel_up_next();
     let Some(overlay) = overlay() else { return };
     let card = widgets::hbox(10);
@@ -379,13 +385,19 @@ fn show_up_next_card(next: nyx_media_model::MediaItem, preview: bool) {
     let item = next.clone();
     let timer = glib::timeout_add_seconds_local(1, move || {
         if preview {
-            let remaining = UI.with(|u| u.borrow().as_ref().map(|u| {
-                let p = u.player.borrow();
-                (p.duration() - p.position).max(0.0).ceil() as u32
-            })).unwrap_or(0);
+            let remaining = UI
+                .with(|u| {
+                    u.borrow().as_ref().map(|u| {
+                        let p = u.player.borrow();
+                        (p.duration() - p.position).max(0.0).ceil() as u32
+                    })
+                })
+                .unwrap_or(0);
             let lead = prefs::get().up_next_seconds.min(30);
             if lead == 0 || remaining > lead {
-                if let Some((card, _)) = UP_NEXT.with(|v| v.borrow_mut().take()) { remove_card(&card); }
+                if let Some((card, _)) = UP_NEXT.with(|v| v.borrow_mut().take()) {
+                    remove_card(&card);
+                }
                 return glib::ControlFlow::Break;
             }
             count.set_text(&format!("Episode ends in {remaining} s"));
@@ -464,7 +476,8 @@ pub fn build(app: &gtk::Application) {
             _ => {}
         }
         let (button, content) = nav_row(icon, title, None);
-        if id != "home" && id != "discover"
+        if id != "home"
+            && id != "discover"
             && let Some(readout) = content.last_child().and_downcast::<gtk::Label>()
         {
             counts.push((id, readout));
@@ -505,9 +518,14 @@ pub fn build(app: &gtk::Application) {
     focus.connect_enter(|_| set_search_origin());
     search.add_controller(focus);
     search.connect_search_changed(|entry| {
-        if SEARCH_CLEARING.with(|clearing| clearing.get()) { return; }
+        if SEARCH_CLEARING.with(|clearing| clearing.get()) {
+            return;
+        }
         let origin = SEARCH_ORIGIN.with(|origin| origin.borrow().clone());
-        if origin == "playlists" { crate::playlists::search(&entry.text()); return; }
+        if origin == "playlists" {
+            crate::playlists::search(&entry.text());
+            return;
+        }
         crate::library::search(&entry.text(), &origin);
         if !entry.text().is_empty() {
             show_page("search");
@@ -646,9 +664,7 @@ pub fn build(app: &gtk::Application) {
                 hide_search();
                 drop_search_focus();
             }
-            gdk::Key::Escape if UI.with(|u| u.borrow().as_ref().is_some_and(|u| !u.search.text().is_empty())) => {
-                hide_search()
-            }
+            gdk::Key::Escape if UI.with(|u| u.borrow().as_ref().is_some_and(|u| !u.search.text().is_empty())) => hide_search(),
             gdk::Key::Left | gdk::Key::Right if !ctrl => {
                 let handled = UI.with(|u| {
                     if let Some(u) = u.borrow().as_ref() {
@@ -689,9 +705,9 @@ pub fn build(app: &gtk::Application) {
             return;
         }
         let inside = UI.with(|u| {
-            u.borrow().as_ref().is_some_and(|u| {
-                window.pick(x, y, gtk::PickFlags::DEFAULT).is_some_and(|w| in_search(&w, &u.search))
-            })
+            u.borrow()
+                .as_ref()
+                .is_some_and(|u| window.pick(x, y, gtk::PickFlags::DEFAULT).is_some_and(|w| in_search(&w, &u.search)))
         });
         if !inside {
             drop_search_focus();
@@ -791,10 +807,14 @@ fn set_search_origin() {
             let current = page();
             let origin = if matches!(current.as_str(), "home" | "discover" | "movies" | "tv" | "collections" | "playlists") {
                 current
-            } else { prefs::get().last_library_page };
+            } else {
+                prefs::get().last_library_page
+            };
             let origin = if origin.is_empty() { "home".into() } else { origin };
             u.search.set_placeholder_text(Some(match origin.as_str() {
-                "movies" => "Search movies", "tv" => "Search TV shows", "collections" => "Search collections",
+                "movies" => "Search movies",
+                "tv" => "Search TV shows",
+                "collections" => "Search collections",
                 "playlists" => "Search playlists or playlist videos",
                 _ => "Search movies and shows",
             }));
@@ -805,11 +825,20 @@ fn set_search_origin() {
 fn hide_search() {
     SEARCH_CLEARING.with(|clearing| clearing.set(true));
     let origin = SEARCH_ORIGIN.with(|origin| origin.borrow().clone());
-    UI.with(|u| if let Some(u) = u.borrow().as_ref() { u.search.set_text(""); });
-    if origin == "playlists" { crate::playlists::search(""); }
-    else { crate::library::search("", &origin); }
+    UI.with(|u| {
+        if let Some(u) = u.borrow().as_ref() {
+            u.search.set_text("");
+        }
+    });
+    if origin == "playlists" {
+        crate::playlists::search("");
+    } else {
+        crate::library::search("", &origin);
+    }
     SEARCH_CLEARING.with(|clearing| clearing.set(false));
-    if page() == "search" { show_page(&origin); }
+    if page() == "search" {
+        show_page(&origin);
+    }
 }
 fn show_page(id: &str) {
     UI.with(|u| {
@@ -844,7 +873,9 @@ pub fn page() -> String {
     })
 }
 pub fn navigate(id: &str) {
-    if id != "search" && (page() == "search" || UI.with(|u| u.borrow().as_ref().is_some_and(|u| !u.search.text().is_empty()))) { hide_search(); }
+    if id != "search" && (page() == "search" || UI.with(|u| u.borrow().as_ref().is_some_and(|u| !u.search.text().is_empty()))) {
+        hide_search();
+    }
     NAV_FORWARD.with(|h| h.borrow_mut().clear());
     let previous = page();
     if previous != id {
@@ -910,7 +941,9 @@ pub fn back_from_details() {
             None
         })
         .unwrap_or_else(|| "home".into());
-    if current != "details" { NAV_FORWARD.with(|h| h.borrow_mut().push((current, None))); }
+    if current != "details" {
+        NAV_FORWARD.with(|h| h.borrow_mut().push((current, None)));
+    }
     navigate_inner(&previous);
 }
 pub fn forward() {
@@ -925,8 +958,11 @@ pub fn forward() {
         let remaining = NAV_FORWARD.with(|h| h.borrow().clone());
         let current = page();
         NAV_HISTORY.with(|h| h.borrow_mut().push(current));
-        if let Some(item) = item { crate::library::show_detail(item); }
-        else { navigate_inner(&next); }
+        if let Some(item) = item {
+            crate::library::show_detail(item);
+        } else {
+            navigate_inner(&next);
+        }
         NAV_FORWARD.with(|h| *h.borrow_mut() = remaining);
     }
 }
@@ -1046,9 +1082,9 @@ fn show_shortcuts() {
 
 fn search_focused() -> bool {
     UI.with(|u| {
-        u.borrow().as_ref().is_some_and(|u| {
-            gtk::prelude::GtkWindowExt::focus(&u.window).is_some_and(|w| in_search(&w, &u.search))
-        })
+        u.borrow()
+            .as_ref()
+            .is_some_and(|u| gtk::prelude::GtkWindowExt::focus(&u.window).is_some_and(|w| in_search(&w, &u.search)))
     })
 }
 fn in_search(widget: &gtk::Widget, search: &gtk::SearchEntry) -> bool {

@@ -28,10 +28,17 @@ thread_local! {
 pub fn build(stack: &gtk::Stack) {
     let page = widgets::page("playlists");
     stack.add_named(&page.root, Some("playlists"));
-    UI.with(|ui| *ui.borrow_mut() = Some(Ui { body: page.body, lists: vec![], selected: None, closed: None, query: String::new(), generation: 0 }));
+    UI.with(|ui| {
+        *ui.borrow_mut() =
+            Some(Ui { body: page.body, lists: vec![], selected: None, closed: None, query: String::new(), generation: 0 })
+    });
 }
 pub fn search(query: &str) {
-    UI.with(|ui| if let Some(ui) = ui.borrow_mut().as_mut() { ui.query = query.trim().to_lowercase(); });
+    UI.with(|ui| {
+        if let Some(ui) = ui.borrow_mut().as_mut() {
+            ui.query = query.trim().to_lowercase();
+        }
+    });
     render();
 }
 pub fn show() {
@@ -253,7 +260,8 @@ fn select(id: Option<String>) {
     window::playlist_selected();
 }
 fn render() {
-    let state = UI.with(|ui| ui.borrow().as_ref().map(|ui| (ui.body.clone(), ui.lists.clone(), ui.selected.clone(), ui.query.clone())));
+    let state =
+        UI.with(|ui| ui.borrow().as_ref().map(|ui| (ui.body.clone(), ui.lists.clone(), ui.selected.clone(), ui.query.clone())));
     let Some((body, lists, selected, query)) = state else { return };
     while let Some(child) = body.first_child() {
         body.remove(&child);
@@ -294,7 +302,9 @@ fn render() {
             let Some(switch_views) = switch_views.upgrade() else { return };
             let show_list = switch_views.visible_child_name().as_deref() != Some("list");
             switch_views.set_visible_child_name(if show_list { "list" } else { "posters" });
-            prefs::update(|p| { p.list_views.insert("playlist_contents".into(), show_list); });
+            prefs::update(|p| {
+                p.list_views.insert("playlist_contents".into(), show_list);
+            });
         });
         title_row.append(&toggle);
         header.append(&title_row);
@@ -307,9 +317,9 @@ fn render() {
         }
         let list = Rc::new(list);
         let model = gtk::gio::ListStore::new::<glib::BoxedAnyObject>();
-        let entries: Vec<usize> = (0..list.entries.len()).filter(|&i| {
-            query.is_empty() || list.entries[i].media.title.to_lowercase().contains(&query)
-        }).collect();
+        let entries: Vec<usize> = (0..list.entries.len())
+            .filter(|&i| query.is_empty() || list.entries[i].media.title.to_lowercase().contains(&query))
+            .collect();
         for index in entries {
             model.append(&glib::BoxedAnyObject::new(index));
         }
@@ -342,13 +352,22 @@ fn render() {
             let index = *value.borrow::<usize>();
             row.set_child(Some(&entry_poster(&list, index, &list.entries[index])));
         });
-        poster_factory.connect_unbind(|_, row| if let Some(row) = row.downcast_ref::<gtk::ListItem>() { row.set_child(None::<&gtk::Widget>); });
+        poster_factory.connect_unbind(|_, row| {
+            if let Some(row) = row.downcast_ref::<gtk::ListItem>() {
+                row.set_child(None::<&gtk::Widget>);
+            }
+        });
         let posters = gtk::GridView::new(Some(gtk::NoSelection::new(Some(model))), Some(poster_factory));
         posters.add_css_class("poster-grid");
         posters.set_min_columns(2);
         posters.set_max_columns(12);
-        let poster_scroll = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never)
-            .vscrollbar_policy(gtk::PolicyType::External).min_content_height(400).vexpand(true).child(&posters).build();
+        let poster_scroll = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .vscrollbar_policy(gtk::PolicyType::External)
+            .min_content_height(400)
+            .vexpand(true)
+            .child(&posters)
+            .build();
         views.add_named(&poster_scroll, Some("posters"));
         views.set_visible_child_name(if selected_view { "list" } else { "posters" });
         body.append(&views);
@@ -364,7 +383,9 @@ fn render() {
         if lists.is_empty() {
             body.append(&widgets::label("Create a playlist, or connect a server to load its video playlists.", "dim"));
         }
-        let data = Rc::new(lists.into_iter().filter(|list| query.is_empty() || list.title.to_lowercase().contains(&query)).collect::<Vec<_>>());
+        let data = Rc::new(
+            lists.into_iter().filter(|list| query.is_empty() || list.title.to_lowercase().contains(&query)).collect::<Vec<_>>(),
+        );
         let model = gtk::gio::ListStore::new::<glib::BoxedAnyObject>();
         for index in 0..data.len() {
             model.append(&glib::BoxedAnyObject::new(index));
@@ -426,7 +447,9 @@ fn entry_row(list: &Rc<Playlist>, position: usize, entry: &Entry) -> gtk::Box {
     card.set_hexpand(true);
     line.append(&card);
     let offline = servers::client(&media.id.server).is_none();
-    if offline { line.append(&widgets::label("Offline", "dim")); }
+    if offline {
+        line.append(&widgets::label("Offline", "dim"));
+    }
     if list.origin.is_none() {
         for (icon, delta) in [("go-up-symbolic", -1), ("go-down-symbolic", 1)] {
             let button = nyx_ui::widgets::icon_button(icon, if delta < 0 { "Move up" } else { "Move down" });
@@ -458,12 +481,18 @@ fn entry_poster(list: &Rc<Playlist>, position: usize, entry: &Entry) -> gtk::Box
             let button = nyx_ui::widgets::icon_button(icon, if delta < 0 { "Move up" } else { "Move down" });
             button.set_sensitive(if delta < 0 { position > 0 } else { position + 1 < list.entries.len() });
             let (id, key) = (list.id.clone(), entry.id.clone());
-            button.connect_clicked(move |_| { let key = key.clone(); edit(id.clone(), move |list| list.move_entry(&key, delta)); });
+            button.connect_clicked(move |_| {
+                let key = key.clone();
+                edit(id.clone(), move |list| list.move_entry(&key, delta));
+            });
             actions.append(&button);
         }
         let remove = nyx_ui::widgets::icon_button("list-remove-symbolic", "Remove from playlist");
         let (id, key) = (list.id.clone(), entry.id.clone());
-        remove.connect_clicked(move |_| { let key = key.clone(); edit(id.clone(), move |list| list.entries.retain(|e| e.id != key)); });
+        remove.connect_clicked(move |_| {
+            let key = key.clone();
+            edit(id.clone(), move |list| list.entries.retain(|e| e.id != key));
+        });
         actions.append(&remove);
         card.root.append(&actions);
     }

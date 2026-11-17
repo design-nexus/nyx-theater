@@ -193,7 +193,11 @@ fn build(page: &Page) {
         "Distance for back and forward buttons and the arrow keys.",
         widgets::opts(&[("5", "5 seconds"), ("10", "10 seconds"), ("30", "30 seconds"), ("60", "60 seconds")]),
         &seek,
-        |value| if let Ok(seconds) = value.parse::<u32>() { prefs::update(|p| p.seek_seconds = seconds); },
+        |value| {
+            if let Ok(seconds) = value.parse::<u32>() {
+                prefs::update(|p| p.seek_seconds = seconds);
+            }
+        },
     );
     g.add(&row);
     let (row, _) = widgets::switch_row(
@@ -210,9 +214,18 @@ fn build(page: &Page) {
         |on| prefs::update(|p| p.autoplay_next = on),
     );
     g.add(&row);
-    let (row, _) = widgets::choice_row("Show Up next", "Preview before the end. Autoplay still waits for this episode to finish; Off hides the card.",
-        widgets::opts(&[("0", "Off"), ("10", "10 seconds before the end"), ("20", "20 seconds before the end"), ("30", "30 seconds before the end")]),
-        &p.up_next_seconds.to_string(), |id| prefs::update(|p| p.up_next_seconds = id.parse().unwrap_or(10)));
+    let (row, _) = widgets::choice_row(
+        "Show Up next",
+        "Preview before the end. Autoplay still waits for this episode to finish; Off hides the card.",
+        widgets::opts(&[
+            ("0", "Off"),
+            ("10", "10 seconds before the end"),
+            ("20", "20 seconds before the end"),
+            ("30", "30 seconds before the end"),
+        ]),
+        &p.up_next_seconds.to_string(),
+        |id| prefs::update(|p| p.up_next_seconds = id.parse().unwrap_or(10)),
+    );
     g.add(&row);
     let (row, _) = widgets::choice_row(
         "Poster size",

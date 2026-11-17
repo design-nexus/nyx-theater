@@ -25,9 +25,12 @@ fn ids(ids: &ExternalIds) -> Vec<(String, String)> {
         result.push(("tvdb".into(), id));
     }
     if let Some(id) = ids.imdb.as_deref().map(str::trim).map(str::to_ascii_lowercase)
-        && id.starts_with("tt") && id.len() > 2 && id[2..].bytes().all(|c| c.is_ascii_digit()) {
-            result.push(("imdb".into(), id));
-        }
+        && id.starts_with("tt")
+        && id.len() > 2
+        && id[2..].bytes().all(|c| c.is_ascii_digit())
+    {
+        result.push(("imdb".into(), id));
+    }
     result
 }
 fn keys(item: &MediaItem, series: &HashMap<ItemId, ExternalIds>) -> Vec<Key> {
@@ -41,13 +44,13 @@ fn keys(item: &MediaItem, series: &HashMap<ItemId, ExternalIds>) -> Vec<Key> {
     if item.kind == MediaKind::Episode
         && let (Some(series), Some(season), Some(episode)) =
             (item.series.as_ref().and_then(|id| series.get(id)), item.season_number, item.episode_number)
-        {
-            result.extend(
-                ids(series)
-                    .into_iter()
-                    .map(|(namespace, id)| (kind, format!("series-{namespace}"), format!("{id}/{season}/{episode}"))),
-            );
-        }
+    {
+        result.extend(
+            ids(series)
+                .into_iter()
+                .map(|(namespace, id)| (kind, format!("series-{namespace}"), format!("{id}/{season}/{episode}"))),
+        );
+    }
     result
 }
 fn compatible(a: &[Key], b: &[Key]) -> bool {

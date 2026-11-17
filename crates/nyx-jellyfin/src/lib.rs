@@ -351,10 +351,11 @@ impl Client {
         let raw = self.get(&format!("Items/{}", item.id), &[("userId", self.user.clone())])?;
         let mut full = parse_item(&raw, &self.server, "").ok_or_else(invalid)?;
         if raw["LocalTrailerCount"].as_u64().unwrap_or(0) > 0
-            && let Ok(trailers) = self.get(&format!("Items/{}/LocalTrailers", item.id), &[("userId", self.user.clone())]) {
-                full.metadata.provider_trailers =
-                    trailers.as_array().into_iter().flatten().take(8).filter_map(|v| parse_item(v, &self.server, "")).collect();
-            }
+            && let Ok(trailers) = self.get(&format!("Items/{}/LocalTrailers", item.id), &[("userId", self.user.clone())])
+        {
+            full.metadata.provider_trailers =
+                trailers.as_array().into_iter().flatten().take(8).filter_map(|v| parse_item(v, &self.server, "")).collect();
+        }
 
         if raw["PartCount"].as_u64().unwrap_or(1) > 1 {
             let mut aggregate = None;

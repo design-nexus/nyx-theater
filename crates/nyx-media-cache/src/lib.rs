@@ -148,7 +148,13 @@ impl Cache {
         self.db.execute(
             "INSERT INTO library_sync VALUES (?1,?2,?3,?4,?5) ON CONFLICT(server,library) DO UPDATE
             SET synced_at=excluded.synced_at, full_at=excluded.full_at, counts=excluded.counts",
-            params![serde_json::to_string(server)?, library, marks.synced_at, marks.full_at, serde_json::to_string(&marks.counts)?],
+            params![
+                serde_json::to_string(server)?,
+                library,
+                marks.synced_at,
+                marks.full_at,
+                serde_json::to_string(&marks.counts)?
+            ],
         )?;
         Ok(())
     }

@@ -18,11 +18,12 @@ pub fn enrich(items: &mut [MediaItem]) {
             item.tv.series_poster = series.poster.clone().or(item.tv.series_poster.take());
         }
         if item.kind == MediaKind::Episode
-            && let Some(season) = item.parent.as_ref().and_then(|id| context.get(id)).filter(|i| i.kind == MediaKind::Season) {
-                item.tv.season_poster = season.poster.clone().or(item.tv.season_poster.take());
-                item.tv.episode_count = season.tv.episode_count;
-                item.tv.unwatched_episodes = item.tv.unwatched_episodes.or(season.metadata.unwatched_episodes);
-            }
+            && let Some(season) = item.parent.as_ref().and_then(|id| context.get(id)).filter(|i| i.kind == MediaKind::Season)
+        {
+            item.tv.season_poster = season.poster.clone().or(item.tv.season_poster.take());
+            item.tv.episode_count = season.tv.episode_count;
+            item.tv.unwatched_episodes = item.tv.unwatched_episodes.or(season.metadata.unwatched_episodes);
+        }
     }
 }
 pub fn posters(item: &MediaItem) -> Vec<String> {
@@ -107,23 +108,38 @@ pub fn recently_added_shows(episodes: &[MediaItem], items: &[MediaItem]) -> Vec<
         show.added_at = newest;
         let mut seasons: std::collections::BTreeMap<u32, Vec<u32>> = std::collections::BTreeMap::new();
         for episode in episodes {
-            if newest.zip(episode.added_at).is_some_and(|(latest, added)| latest.saturating_sub(added) > 86400) { continue; }
+            if newest.zip(episode.added_at).is_some_and(|(latest, added)| latest.saturating_sub(added) > 86400) {
+                continue;
+            }
             if let (Some(season), Some(number)) = (episode.season_number, episode.episode_number) {
                 seasons.entry(season).or_default().push(number);
             }
         }
-        let text = seasons.into_iter().map(|(season, mut numbers)| {
-            numbers.sort_unstable();
-            numbers.dedup();
-            let runs = numbers.into_iter().fold(Vec::<(u32, u32)>::new(), |mut runs, n| {
-                if let Some(last) = runs.last_mut().filter(|(_, end)| *end + 1 == n) { last.1 = n; }
-                else { runs.push((n, n)); }
-                runs
-            });
-            let episodes = runs.into_iter().map(|(start, end)| if start == end { start.to_string() } else { format!("{start}–{end}") })
-                .collect::<Vec<_>>().join(", ");
-            format!("Season {season} · Episode{} {episodes}", if episodes.contains('–') || episodes.contains(',') { "s" } else { "" })
-        }).collect::<Vec<_>>().join(" · ");
+        let text = seasons
+            .into_iter()
+            .map(|(season, mut numbers)| {
+                numbers.sort_unstable();
+                numbers.dedup();
+                let runs = numbers.into_iter().fold(Vec::<(u32, u32)>::new(), |mut runs, n| {
+                    if let Some(last) = runs.last_mut().filter(|(_, end)| *end + 1 == n) {
+                        last.1 = n;
+                    } else {
+                        runs.push((n, n));
+                    }
+                    runs
+                });
+                let episodes = runs
+                    .into_iter()
+                    .map(|(start, end)| if start == end { start.to_string() } else { format!("{start}–{end}") })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "Season {season} · Episode{} {episodes}",
+                    if episodes.contains('–') || episodes.contains(',') { "s" } else { "" }
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" · ");
         recent.push((show, text));
     }
     recent.sort_by_key(|(show, _)| std::cmp::Reverse(show.added_at));

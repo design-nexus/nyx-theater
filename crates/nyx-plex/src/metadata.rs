@@ -136,9 +136,10 @@ pub fn technical(v: &Value) -> Technical {
             }
         }
         if s["streamType"] == 3
-            && let Some(l) = text(&s["languageCode"]).or_else(|| text(&s["language"])) {
-                t.subtitle_languages.push(l);
-            }
+            && let Some(l) = text(&s["languageCode"]).or_else(|| text(&s["language"]))
+        {
+            t.subtitle_languages.push(l);
+        }
     }
     t.audio_codecs.sort();
     t.audio_codecs.dedup();

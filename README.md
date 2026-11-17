@@ -5,6 +5,8 @@ play them, and pick up where you left off.
 
 ## Install
 
+On NyxOS, choose Theater in Welcome when you set up, or install it later from the Store or with `nyx install nyx-theater`. On Omarchy:
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/design-nexus/nyx-theater/main/install.sh | bash -s -- theater
 ```
